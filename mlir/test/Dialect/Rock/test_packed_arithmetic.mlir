@@ -1,18 +1,17 @@
-// RUN: rocmlir-opt --rock-affix-params --rock-gemm-to-gridwise --rock-regularize \
-// RUN: --rock-gridwise-gemm-to-blockwise --rock-linalg-align \
-// RUN: --convert-linalg-to-affine-loops --rock-vectorize-fusions %s | FileCheck %s --check-prefix=VECTORIZE
+// RUN: rocmlir-driver --kernel-pipeline=gpu --arch gfx942 \
+// RUN:  --mlir-print-ir-after=rock-vectorize-fusions -o /dev/null 2>&1 %s | FileCheck %s --check-prefix=VECTORIZE
+
 // RUN:  rocmlir-driver --kernel-pipeline=gpu,rocdl --arch=gfx942 %s | FileCheck %s --check-prefix=ROCDL
 // RUN:  rocmlir-driver --kernel-pipeline=gpu,rocdl --arch=gfx942 %s | \
-// RUN:  rocmlir-translate --gpu-module-to-rocdlir | opt -passes='default<O3>,strip' -S | FileCheck %s --check-prefix=LLVM
+// RUN:    rocmlir-translate --gpu-module-to-rocdlir | opt -passes='default<O3>,strip' -mcpu=gfx942 -S | FileCheck %s --check-prefix=LLVM
 // RUN:  rocmlir-driver --kernel-pipeline=gpu,rocdl --arch=gfx942 %s | \
-// RUN:  rocmlir-translate --gpu-module-to-rocdlir | opt -passes='default<O3>,strip' -S | llc -O3 -mcpu=gfx942 |  FileCheck %s --check-prefix=ASM
+// RUN:    rocmlir-translate --gpu-module-to-rocdlir | opt -passes='default<O3>,strip' -mcpu=gfx942 -S | llc -O3 -mcpu=gfx942 |  FileCheck %s --check-prefix=ASM
 #map = affine_map<(d0, d1) -> (0, d0, d1)>
 #map1 = affine_map<(d0, d1) -> (d0, d1)>
 #map2 = affine_map<(d0, d1, d2) -> (d0 * 128 + d1, d2)>
 #transform_map = #rock.transform_map<#map by [<Merge{1, 128} ["dim0"] at [0] -> ["col0", "col1"] at [0, 1]>, <PassThrough ["dim1"] at [1] -> ["dim1"] at [2]>] bounds = [128, 128] -> [1, 128, 128]>
 #transform_map1 = #rock.transform_map<#map2 by [<Unmerge{1, 128} ["exp0", "exp1"] at [0, 1] -> ["dim0"] at [0]>, <PassThrough ["dim1"] at [2] -> ["dim1"] at [1]>] bounds = [1, 128, 128] -> [128, 128]>
-// VECTORIZE: affine.for
-// VECTORIZE-SAME: step 2
+// VECTORIZE: affine.for %{{.*}} = 0 to 64 step 2
 // VECTORIZE: %[[vec:.*]] = vector.transfer_read
 // VECTORIZE: %[[trunc:.*]] = arith.truncf %[[vec]]
 // VECTORIZE: vector.transfer_write %[[trunc]]
