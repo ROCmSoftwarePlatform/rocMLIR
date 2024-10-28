@@ -574,6 +574,23 @@ FailureOr<memref::AllocOp> mlir::rock::findMemrefAlloc(Value value) {
   return findAlloc<memref::AllocOp>(value);
 }
 
+FailureOr<BlockArgument> findBlockArgument(Value value) {
+  auto maybeBlockArg = dyn_cast_or_null<BlockArgument>(value);
+  while (!maybeBlockArg) {
+    // Keep going until the operation that defines the value is a
+    // view-like operation
+    if (auto viewOp =
+            dyn_cast_or_null<ViewLikeOpInterface>(value.getDefiningOp())) {
+      value = viewOp.getViewSource();
+    } else {
+      return failure();
+    }
+    maybeBlockArg = dyn_cast_or_null<BlockArgument>(value);
+  }
+
+  return maybeBlockArg;
+}
+
 std::optional<int64_t> mlir::rock::computeConstDiff(Value l, Value u) {
   IntegerAttr clb, cub;
   if (matchPattern(l, m_Constant(&clb)) && matchPattern(u, m_Constant(&cub))) {
@@ -826,9 +843,10 @@ mlir::rock::traceGemmOutputToArgs(Value matC, func::FuncOp func,
   auto funcArgs = func.getArguments();
   // check if matC is a kernel argument
   for (auto arg : funcArgs) {
-    if (matC == arg)
+    if (findBlockArgument(matC) == arg)
       args.push_back(arg);
   }
+  assert(args.empty() || args.size() == 1);
   if (!args.empty())
     return args;
 
