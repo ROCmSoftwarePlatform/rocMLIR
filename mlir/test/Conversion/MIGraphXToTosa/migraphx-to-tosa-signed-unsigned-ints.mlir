@@ -25,7 +25,7 @@ func.func @migraphx_literal_negative() -> !migraphx.shaped<64x3x7x7xsi8, 147x49x
 // CHECK-SAME: (tensor<16xi4>) -> tensor<16xi8>
 func.func @migraphx_convert_int4_signed(%arg0: !migraphx.shaped<16xsi4, 1>) -> !migraphx.shaped<16xi8, 1> {
   %0 = migraphx.convert %arg0 : <16xsi4, 1> to <16xi8, 1>
-    return %0 : !migraphx.shaped<16xi8, 1>
+  return %0 : !migraphx.shaped<16xi8, 1>
 }
 
 // CHECK-LABEL: @migraphx_convert_int4_unsigned
@@ -58,4 +58,24 @@ func.func @migraphx_div_si32(%arg0: !migraphx.shaped<1x36x384x64xsi32, 884736x24
 func.func @migraphx_div_ui32(%arg0: !migraphx.shaped<1x36x384x64xui32, 884736x24576x64x1>, %arg1: !migraphx.shaped<1x36x384x64xui32, 884736x24576x64x1>) -> !migraphx.shaped<1x36x384x64xui32, 884736x24576x64x1> attributes{kernel, arch = ""} {
   %0 = migraphx.div %arg0, %arg1 : <1x36x384x64xui32, 884736x24576x64x1>, <1x36x384x64xui32, 884736x24576x64x1> -> <1x36x384x64xui32, 884736x24576x64x1>
   return %0 : !migraphx.shaped<1x36x384x64xui32, 884736x24576x64x1>
+}
+
+// CHECK-LABEL: func @dequantize_scale_bias_ui32
+// CHECK: tosa.custom %{{.*}} {domain_name = "rocmlir", implementation_attrs = "", operator_name = "unsigned_cast"} : (tensor<1x112x112x64xi32>) -> tensor<1x112x112x64xf32>
+// CHECK: tosa.custom %{{.*}} {domain_name = "rocmlir", implementation_attrs = "", operator_name = "unsigned_cast"} : (tensor<64xi32>) -> tensor<64xf32>
+// CHECK: tosa.sub
+// CHECK: tosa.mul
+func.func @dequantize_scale_bias_ui32(%arg: !migraphx.shaped<1x112x112x64xui32, 802816x7168x64x1>, %scale: !migraphx.shaped<64xf32, 1>, %bias: !migraphx.shaped<64xui32, 1>) -> !migraphx.shaped<1x112x112x64xf32, 802816x7168x64x1> attributes {kernel = "mixr"} {
+  %1 = migraphx.dequantizelinear %arg, %scale, %bias : <1x112x112x64xui32, 802816x7168x64x1>, <64xf32, 1>, !migraphx.shaped<64xui32, 1> -> <1x112x112x64xf32, 802816x7168x64x1>
+  return %1 : !migraphx.shaped<1x112x112x64xf32, 802816x7168x64x1>
+}
+
+// CHECK-LABEL: func @dequantize_scale_bias_si32
+// CHECK: tosa.cast{{.*}}f32
+// CHECK: tosa.cast{{.*}}f32
+// CHECK: tosa.sub
+// CHECK: tosa.mul
+func.func @dequantize_scale_bias_si32(%arg: !migraphx.shaped<1x112x112x64xsi32, 802816x7168x64x1>, %scale: !migraphx.shaped<64xf32, 1>, %bias: !migraphx.shaped<64xsi32, 1>) -> !migraphx.shaped<1x112x112x64xf32, 802816x7168x64x1> attributes {kernel = "mixr"} {
+  %1 = migraphx.dequantizelinear %arg, %scale, %bias : <1x112x112x64xsi32, 802816x7168x64x1>, <64xf32, 1>, !migraphx.shaped<64xsi32, 1> -> <1x112x112x64xf32, 802816x7168x64x1>
+  return %1 : !migraphx.shaped<1x112x112x64xf32, 802816x7168x64x1>
 }
