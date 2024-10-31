@@ -246,7 +246,13 @@ RankedTensorType MIXRShapedType::asMemoryLayoutTensor() const {
       orderedShape[prevIdx] = stride / prevStride;
     }
   }
-  return RankedTensorType::get(orderedShape, getElementType());
+  Type elementType = getElementType();
+  if (elementType.isInteger() && !elementType.isSignlessInteger()) {
+    elementType =
+        IntegerType::get(getContext(), elementType.getIntOrFloatBitWidth(),
+                         IntegerType::SignednessSemantics::Signless);
+  }
+  return RankedTensorType::get(orderedShape, elementType);
 }
 
 RankedTensorType MIXRShapedType::asFlatMemoryTensor() const {

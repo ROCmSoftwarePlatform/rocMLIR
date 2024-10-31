@@ -559,14 +559,6 @@ module {
      return %0 : !migraphx.shaped<16xf32, 1>
   }
 
-  // CHECK-LABEL: func.func @func_convert
-  // CHECK: tosa.custom
-  // CHECK-SAME: {domain_name = "rocmlir", implementation_attrs = "", operator_name = "unsigned_cast"} : (tensor<16xi4>) -> tensor<16xi8>
-  func.func @func_convert_int4_unsigned(%arg0: !migraphx.shaped<16xi4, 1>) -> !migraphx.shaped<16xi8, 1> {
-    %0 = migraphx.convert zero_extend %arg0 : <16xi4, 1> to <16xi8, 1>
-     return %0 : !migraphx.shaped<16xi8, 1>
-  }
-
   // CHECK-LABEL: func.func @func_div_f32
   // CHECK: tosa.reciprocal
   // CHECK: tosa.mul

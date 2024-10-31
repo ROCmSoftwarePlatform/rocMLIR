@@ -77,8 +77,15 @@ static MIXRShapedType asInt4Tensor(const MIXRShapedType byteType,
        llvm::enumerate(MutableArrayRef<int64_t>(strides)))
     if (static_cast<int64_t>(index) != axis)
       stride *= 2;
-  return MIXRShapedType::get(sizes, strides,
-                             IntegerType::get(byteType.getContext(), 4));
+
+  auto signedness = IntegerType::SignednessSemantics::Signless;
+  if (byteType.getElementType().isUnsignedInteger())
+    signedness = IntegerType::SignednessSemantics::Unsigned;
+  else if (byteType.getElementType().isSignedInteger())
+    signedness = IntegerType::SignednessSemantics::Signed;
+
+  return MIXRShapedType::get(
+      sizes, strides, IntegerType::get(byteType.getContext(), 4, signedness));
 }
 
 LogicalResult RewriteByteUnpackPattern::matchAndRewrite(
@@ -91,12 +98,9 @@ LogicalResult RewriteByteUnpackPattern::matchAndRewrite(
   int64_t axis = op.getAxis();
   MIXRShapedType packedByteType = op.getIn().getType();
   MIXRShapedType actualType = asInt4Tensor(packedByteType, axis);
-  Value reinterpreted = rewriter.create<UnpackOp>(
-      loc, actualType, adaptor.getIn(), axis, adaptor.getIsUnsigned());
-  rewriter.replaceOpWithNewOp<ConvertOp>(op, outType, reinterpreted,
-                                         /*zeroExtend=*/adaptor.getIsUnsigned()
-                                             ? rewriter.getUnitAttr()
-                                             : nullptr);
+  Value reinterpreted =
+      rewriter.create<UnpackOp>(loc, actualType, adaptor.getIn(), axis);
+  rewriter.replaceOpWithNewOp<ConvertOp>(op, outType, reinterpreted);
   return success();
 }
 
@@ -113,8 +117,7 @@ LogicalResult TransposeUnpackInterchange::matchAndRewrite(
   MIXRShapedType preTrReinterpretedType =
       asInt4Tensor(trOp.getInput().getType(), preTransposeAxis);
   Value reinterpreted = rewriter.create<UnpackOp>(
-      op.getLoc(), preTrReinterpretedType, trOp.getInput(), preTransposeAxis,
-      adaptor.getIsUnsigned());
+      op.getLoc(), preTrReinterpretedType, trOp.getInput(), preTransposeAxis);
   // Not a replaceOpWithNewOp() because we're keeping a different op's location.
   Value transposed = rewriter.create<TransposeOp>(
       trOp.getLoc(), op.getOut().getType(), reinterpreted, permutation);
@@ -144,9 +147,8 @@ LogicalResult ReshapeUnpackInterchange::matchAndRewrite(
       lastUnitDim = idx;
   MIXRShapedType oldShapeInt4 = asInt4Tensor(oldShapeBytes, lastUnitDim);
   MIXRShapedType newShapeInt4 = op.getOut().getType();
-  Value reinterpreted =
-      rewriter.create<UnpackOp>(op.getLoc(), oldShapeInt4, reshapeOp.getInput(),
-                                lastUnitDim, adaptor.getIsUnsigned());
+  Value reinterpreted = rewriter.create<UnpackOp>(
+      op.getLoc(), oldShapeInt4, reshapeOp.getInput(), lastUnitDim);
   Value reshaped = rewriter.create<ReshapeOp>(
       reshapeOp.getLoc(), newShapeInt4, reinterpreted,
       rewriter.getI64ArrayAttr(newShapeInt4.getShape()));
@@ -176,8 +178,7 @@ LogicalResult MultiBroadcastUnpackInterchange::matchAndRewrite(
     }
   }
   Value reinterpreted = rewriter.create<UnpackOp>(
-      op.getLoc(), preBroadcastInt4, broadcastOp.getInput(), adaptor.getAxis(),
-      adaptor.getIsUnsigned());
+      op.getLoc(), preBroadcastInt4, broadcastOp.getInput(), adaptor.getAxis());
   Value broadcasted = rewriter.create<MultiBroadcastOp>(
       broadcastOp.getLoc(), op.getOut().getType(), reinterpreted,
       rewriter.getArrayAttr(newOutLens));
@@ -195,7 +196,7 @@ LogicalResult FuncArgUnpackElimination::matchAndRewrite(
       dyn_cast<func::FuncOp>(unpackArg.getParentRegion()->getParentOp());
   if (!funcOp)
     return op.emitOpError("A tensor that'll be unpacked is an argument to "
-                          "somethng other than a function");
+                          "something other than a function");
   MIXRShapedType int4Type = op.getResult().getType();
   FunctionType funcType = funcOp.getFunctionType();
   SmallVector<Type> newInTypes(funcType.getInputs());

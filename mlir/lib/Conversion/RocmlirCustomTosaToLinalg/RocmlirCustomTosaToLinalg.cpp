@@ -49,8 +49,11 @@ LogicalResult UnsignedCastLoweringPattern::matchAndRewrite(
     ConversionPatternRewriter &rewriter) const {
   if (op.getDomainName() != "rocmlir")
     return rewriter.notifyMatchFailure(op, "domain isn't rocmlir");
-  if (op.getOperatorName() != "unsigned_cast")
-    return rewriter.notifyMatchFailure(op, "isn't an unsigned_cast");
+  if (op.getOperatorName() != "unsigned_cast" &&
+      op.getOperatorName() != "unsigned_div")
+    return rewriter.notifyMatchFailure(
+        op, "isn't an unsigned_cast or unsigned_div");
+
   Location loc = op.getLoc();
   auto outType = cast<RankedTensorType>(op.getResults().front().getType());
   Type outElemType = outType.getElementType();
@@ -61,17 +64,21 @@ LogicalResult UnsignedCastLoweringPattern::matchAndRewrite(
       2, rewriter.getMultiDimIdentityMap(outType.getRank()));
   SmallVector<utils::IteratorType> iteratorKinds(outType.getRank(),
                                                  utils::IteratorType::parallel);
-  auto cast = rewriter.create<linalg::GenericOp>(
+  auto genericOp = rewriter.create<linalg::GenericOp>(
       loc, outType, adaptor.getInputs(), emptyTensor, iterationMaps,
       iteratorKinds, [&](OpBuilder &b, Location loc, ValueRange inputs) {
         Value result;
-        if (isa<FloatType>(outElemType))
-          result = b.create<arith::UIToFPOp>(loc, outElemType, inputs[0]);
-        else
-          result = b.create<arith::ExtUIOp>(loc, outElemType, inputs[0]);
+        if (op.getOperatorName() == "unsigned_cast") {
+          if (isa<FloatType>(outElemType))
+            result = b.create<arith::UIToFPOp>(loc, outElemType, inputs[0]);
+          else
+            result = b.create<arith::ExtUIOp>(loc, outElemType, inputs[0]);
+        } else if (op.getOperatorName() == "unsigned_div") {
+          result = b.create<arith::DivUIOp>(loc, outElemType, inputs);
+        }
         b.create<linalg::YieldOp>(loc, result);
       });
-  rewriter.replaceOp(op, cast);
+  rewriter.replaceOp(op, genericOp);
   return success();
 }
 

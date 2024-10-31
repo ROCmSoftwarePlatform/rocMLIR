@@ -41,8 +41,27 @@ using mlir::migraphx::MIXRShapedType;
 //===----------------------------------------------------------------------===//
 
 migraphx::MIXRShapedToTensorConverter::MIXRShapedToTensorConverter() {
-  addConversion([](Type type) { return type; });
-  addConversion([](MIXRShapedType shaped) { return shaped.asTensor(); });
+  addConversion([](Type type) {
+    if (type.isInteger() && !type.isSignlessInteger()) {
+      type = IntegerType::get(type.getContext(), type.getIntOrFloatBitWidth(),
+                              IntegerType::SignednessSemantics::Signless);
+    }
+    return type;
+  });
+  addConversion([](MIXRShapedType shaped) {
+    RankedTensorType newType = shaped.asTensor();
+    Type elementType = newType.getElementType();
+
+    // Convert to signless if the element type is a signed integer
+    if (elementType.isInteger() && !elementType.isSignlessInteger()) {
+      elementType = IntegerType::get(
+          shaped.getContext(), elementType.getIntOrFloatBitWidth(),
+          IntegerType::SignednessSemantics::Signless);
+      // Create a new tensor type with the signless element type
+      newType = RankedTensorType::get(newType.getShape(), elementType);
+    }
+    return newType;
+  });
 
   addSourceMaterialization([](OpBuilder &b, MIXRShapedType shapedResType,
                               ValueRange tensorResult,
@@ -92,13 +111,21 @@ static TosaOp createOpAndInfer(PatternRewriter &rewriter, Location loc,
   return op;
 }
 
-static tosa::CastOp createCastOp(PatternRewriter &rewriter, Location loc,
-                                 Type resElementType, Value input) {
-  ShapedType inputType = cast<ShapedType>(input.getType());
-  Type resType = inputType.cloneWith({}, resElementType);
+static Value createCastOp(PatternRewriter &rewriter, Location loc,
+                          Type resElementType, Value input, Type inputType) {
+  ShapedType shapedInputType = cast<ShapedType>(input.getType());
+  Type resType = shapedInputType.cloneWith({}, resElementType);
 
-  auto op = rewriter.create<tosa::CastOp>(loc, resType, input);
-  return op;
+  Value res;
+  if (inputType.isUnsignedInteger()) {
+    res = rewriter
+              .create<tosa::CustomOp>(loc, resType, "unsigned_cast", "rocmlir",
+                                      "", input)
+              .getResult(0);
+  } else {
+    res = rewriter.create<tosa::CastOp>(loc, resType, input).getResult();
+  }
+  return res;
 }
 
 static Type getShapedElementTy(Value v) {
@@ -181,6 +208,7 @@ namespace {
 template <typename ConvType>
 struct ConvConverter final : public OpConversionPattern<ConvType> {
   using OpConversionPattern<ConvType>::OpConversionPattern;
+  using OpConversionPattern<ConvType>::getTypeConverter;
   using OpAdaptor = typename OpConversionPattern<ConvType>::OpAdaptor;
 
   // Note, this lowering pattern works for both migraphx.convolution and
@@ -215,8 +243,13 @@ LogicalResult ConvConverter<ConvType>::matchAndRewrite(
   ValueRange results = op->getResults();
   Type elementTy = inputType.getElementType();
   auto outputTy = cast<MIXRShapedType>(results[0].getType());
+  Type outElementTy = outputTy.getElementType();
+  Type newOutElementTy = getTypeConverter()->convertType(outElementTy);
   SmallVector<int64_t> NCHW2NHWC{0, 2, 3, 1};
   SmallVector<int64_t> NHWC2NCHW{0, 3, 1, 2};
+
+  if (outElementTy.isInteger() && outElementTy.isUnsignedInteger())
+    return op.emitError("No support for unsigned convolution.\n");
 
   int dims = outputTy.getShape().size() - 2;
   SmallVector<int32_t> toChannelLast{0};
@@ -237,7 +270,7 @@ LogicalResult ConvConverter<ConvType>::matchAndRewrite(
   for (int i = 0; i < dims; i++)
     newShape.push_back(outShape[i + 2]);
   newShape.push_back(outShape[1]);
-  Type newOutTy = RankedTensorType::get(newShape, outputTy.getElementType());
+  Type newOutTy = RankedTensorType::get(newShape, newOutElementTy);
 
   // There is no tosa.conv1d, so instead we'll add a dummy x1 dimension
   // to the input tensors, and make a tosa.conv2d.
@@ -258,7 +291,7 @@ LogicalResult ConvConverter<ConvType>::matchAndRewrite(
   case 1:
     // Expand to do a conv2d, because there's no conv1d op.
     newShape.insert(std::prev(newShape.end()), 1);
-    new1DOutTy = RankedTensorType::get(newShape, outputTy.getElementType());
+    new1DOutTy = RankedTensorType::get(newShape, newOutElementTy);
     input = expandTo2D(input);
     filter = expandTo2D(filter);
 
@@ -266,7 +299,7 @@ LogicalResult ConvConverter<ConvType>::matchAndRewrite(
         loc, new1DOutTy,
         ValueRange{
             input, filter,
-            getZeroTensor(loc, outputTy.getElementType(),
+            getZeroTensor(loc, newOutElementTy,
                           cast<ShapedType>(filter.getType()).getShape()[0],
                           rewriter)});
     break;
@@ -276,7 +309,7 @@ LogicalResult ConvConverter<ConvType>::matchAndRewrite(
         loc, newOutTy,
         ValueRange{
             input, filter,
-            getZeroTensor(loc, outputTy.getElementType(),
+            getZeroTensor(loc, newOutElementTy,
                           cast<ShapedType>(filter.getType()).getShape()[0],
                           rewriter)});
     break;
@@ -285,7 +318,7 @@ LogicalResult ConvConverter<ConvType>::matchAndRewrite(
         loc, newOutTy,
         ValueRange{
             input, filter,
-            getZeroTensor(loc, outputTy.getElementType(),
+            getZeroTensor(loc, newOutElementTy,
                           cast<ShapedType>(filter.getType()).getShape()[0],
                           rewriter)});
     break;
@@ -374,12 +407,17 @@ LogicalResult DotConverter<DotType>::matchAndRewrite(
   auto results = op->getResults();
   Type elementTy = inA.getType().getElementType();
   auto origOutputTy = cast<MIXRShapedType>(results[0].getType());
+  Type outElementTy = origOutputTy.getElementType();
+  Type newOutElementTy = getTypeConverter()->convertType(outElementTy);
+
+  if (outElementTy.isInteger() && outElementTy.isUnsignedInteger())
+    return op.emitError("No support for unsigned dot product.\n");
 
   // check batch dimension. Tosa matmul only allow a single dimension for it,
   // add reshape ops to flatten and restore the original dimension.
   ArrayRef<int64_t> origOutDims = origOutputTy.getShape();
   RankedTensorType newOutType =
-      RankedTensorType::get(origOutDims, origOutputTy.getElementType());
+      RankedTensorType::get(origOutDims, newOutElementTy);
   size_t outRank = origOutDims.size();
   ArrayRef<int64_t> orgDimsA = inA.getType().getShape();
   ArrayRef<int64_t> orgDimsB = inB.getType().getShape();
@@ -423,8 +461,7 @@ LogicalResult DotConverter<DotType>::matchAndRewrite(
     }
     RankedTensorType newAType = RankedTensorType::get(newDimsA, elementTy);
     RankedTensorType newBType = RankedTensorType::get(newDimsB, elementTy);
-    newOutType =
-        RankedTensorType::get(newDimsOut, origOutputTy.getElementType());
+    newOutType = RankedTensorType::get(newDimsOut, newOutElementTy);
     auto reshapeAOp = rewriter.create<tosa::ReshapeOp>(
         loc, newAType, inA, rewriter.getDenseI64ArrayAttr(newDimsA));
     auto reshapeBOp = rewriter.create<tosa::ReshapeOp>(
@@ -524,6 +561,7 @@ BroadcastConverter::matchAndRewrite(migraphx::BroadcastOp op, OpAdaptor adaptor,
   ArrayRef<int64_t> outShape = op.getOutput().getType().getShape();
   uint32_t outRank = op.getOutput().getType().getRank();
   Type elemType = op.getOutput().getType().getElementType();
+  Type newOutElementTy = getTypeConverter()->convertType(elemType);
   auto axis =
       static_cast<size_t>(cast<IntegerAttr>(op->getAttr("axis")).getInt());
 
@@ -536,15 +574,15 @@ BroadcastConverter::matchAndRewrite(migraphx::BroadcastOp op, OpAdaptor adaptor,
     }
   }
   tosa::ReshapeOp sameRankReshapedOp = createOpAndInfer<tosa::ReshapeOp>(
-      rewriter, loc, elemType, adaptor.getInput(),
+      rewriter, loc, newOutElementTy, adaptor.getInput(),
       rewriter.getDenseI64ArrayAttr(newShape));
 
-  auto outType = RankedTensorType::get(outShape, elemType);
+  auto outType = RankedTensorType::get(outShape, newOutElementTy);
   // We create a dummy zero addition with implicit broadcasting
   // because tosa does not have an explicit broadcast op
   auto zeroTensor = getZeroTensor(loc, outType, rewriter);
   auto addWithZero = createOpAndInfer<tosa::AddOp>(
-      rewriter, loc, elemType, zeroTensor, sameRankReshapedOp);
+      rewriter, loc, newOutElementTy, zeroTensor, sameRankReshapedOp);
 
   rewriter.replaceOp(op, addWithZero);
   return success();
@@ -789,8 +827,17 @@ DivConverter::matchAndRewrite(migraphx::DivOp op, OpAdaptor adaptor,
   auto inBTensor = cast<TypedValue<RankedTensorType>>(adaptor.getInB());
   Type elementType = inATensor.getType().getElementType();
   if (isa<IntegerType>(elementType)) {
-    Value div = createOpAndInfer<tosa::IntDivOp>(rewriter, loc, elementType,
-                                                 inATensor, inBTensor);
+    auto origElementType = op.getInA().getType().getElementType();
+    Value div;
+    if (origElementType.isUnsignedInteger()) {
+      mlir::SmallVector<mlir::Value, 2> inputs = {inATensor, inBTensor};
+      auto op = rewriter.create<tosa::CustomOp>(
+          loc, inATensor.getType(), "unsigned_div", "rocmlir", "", inputs);
+      div = op->getResult(0);
+    } else {
+      div = createOpAndInfer<tosa::IntDivOp>(rewriter, loc, elementType,
+                                             inATensor, inBTensor);
+    }
     rewriter.replaceOp(op, div);
     return success();
   }
@@ -881,12 +928,14 @@ LogicalResult DeQuantizeLinearConverter::matchAndRewrite(
   Value output = op.getOutput();
   Location loc = op->getLoc();
 
-  Type outputType = getShapedElementTy(output);
-  Value upcastInput = createCastOp(rewriter, loc, outputType, input);
+  Type outputType = getTypeConverter()->convertType(getShapedElementTy(output));
+  Value upcastInput = createCastOp(rewriter, loc, outputType, input,
+                                   op.getInput().getType().getElementType());
 
   Value shifted = upcastInput;
   if (auto bias = adaptor.getBias()) {
-    Value upcastBias = createCastOp(rewriter, loc, outputType, bias);
+    Value upcastBias = createCastOp(rewriter, loc, outputType, bias,
+                                    op.getBias().getType().getElementType());
     shifted = createOpAndInfer<tosa::SubOp>(rewriter, loc, outputType,
                                             upcastInput, upcastBias);
   }
@@ -917,7 +966,7 @@ LogicalResult QuantizeLinearConverter::matchAndRewrite(
   Value scaled = createOpAndInfer<tosa::MulOp>(
       rewriter, loc, elementType, input, inverseScale, /*shift=*/0);
 
-  Type outputType = getShapedElementTy(output);
+  Type outputType = getTypeConverter()->convertType(getShapedElementTy(output));
   // If there is a bias, we upcast to the larger of the bias type and int32_t
   // or float (which is what the bias type is in dequantize, the MLIR
   // quantization implementation, and other ML frameworks) and then do a
@@ -929,10 +978,12 @@ LogicalResult QuantizeLinearConverter::matchAndRewrite(
     if (biasType.getIntOrFloatBitWidth() < 32) {
       biasType = isa<IntegerType>(biasType) ? cast<Type>(rewriter.getI32Type())
                                             : cast<Type>(rewriter.getF32Type());
-      bias = createCastOp(rewriter, loc, biasType, bias);
+      bias = createCastOp(rewriter, loc, biasType, bias,
+                          op.getBias().getType().getElementType());
     }
   }
-  Value asShort = createCastOp(rewriter, loc, biasType, scaled);
+  Value asShort = createCastOp(rewriter, loc, biasType, scaled,
+                               op.getScale().getType().getElementType());
   Value biased = asShort;
   if (bias)
     biased =
@@ -971,7 +1022,7 @@ LogicalResult QuantizeLinearConverter::matchAndRewrite(
     result = createOpAndInfer<tosa::ClampOp>(
         rewriter, loc, biasType, result, minI.getSExtValue(),
         maxI.getSExtValue(), minFatt, maxFatt);
-    result = createCastOp(rewriter, loc, outputType, result);
+    result = createCastOp(rewriter, loc, outputType, result, biasType);
   }
   rewriter.replaceOp(op, result);
 
@@ -981,21 +1032,26 @@ LogicalResult QuantizeLinearConverter::matchAndRewrite(
 LogicalResult
 ConvertConverter::matchAndRewrite(migraphx::ConvertOp op, OpAdaptor adaptor,
                                   ConversionPatternRewriter &rewriter) const {
-  if (!op.getZeroExtend()) {
+
+  if (op.getInA().getType().getElementType().isUnsignedInteger()) {
+    rewriter.replaceOpWithNewOp<tosa::CustomOp>(
+        op, getTypeConverter()->convertType(op.getResult().getType()),
+        "unsigned_cast", "rocmlir", "", adaptor.getInA());
+  } else {
     rewriter.replaceOpWithNewOp<tosa::CastOp>(
         op, getTypeConverter()->convertType(op.getResult().getType()),
         adaptor.getInA());
-    return success();
   }
-  rewriter.replaceOpWithNewOp<tosa::CustomOp>(
-      op, getTypeConverter()->convertType(op.getResult().getType()),
-      "unsigned_cast", "rocmlir", "", adaptor.getInA());
   return success();
 }
 
 LogicalResult
 NegConverter::matchAndRewrite(migraphx::NegOp op, OpAdaptor adaptor,
                               ConversionPatternRewriter &rewriter) const {
+  auto outElementType = op.getResult().getType().getElementType();
+  if (outElementType.isInteger() && outElementType.isUnsignedInteger())
+    return op.emitOpError("can't negate an unsigned int type");
+
   rewriter.replaceOpWithNewOp<tosa::NegateOp>(
       op, getTypeConverter()->convertType(op.getResult().getType()),
       adaptor.getInA(), nullptr);
@@ -1074,11 +1130,35 @@ LogicalResult
 LiteralConverter::matchAndRewrite(migraphx::LiteralOp op, OpAdaptor adaptor,
                                   ConversionPatternRewriter &rewriter) const {
   MIXRShapedType type = op.getResult().getType();
-  RankedTensorType newType = type.asTensor();
+  RankedTensorType newType =
+      cast<RankedTensorType>(getTypeConverter()->convertType(type));
+  if (!newType)
+    return failure();
+
   ElementsAttr value = op.getValue();
-  if (value.isSplat() && value.getType() != newType)
-    value = SplatElementsAttr::get(newType, value.getSplatValue<Attribute>());
-  rewriter.replaceOpWithNewOp<tosa::ConstOp>(op, type.asTensor(), value);
+  if (value.isSplat() && value.getType() != newType) {
+    // Get the original splat value (for example SI8 value)
+    Attribute splatValue = value.getSplatValue<Attribute>();
+
+    // Reinterpret the splatValue under the new type (for example SI8 -> I8),
+    // preserving bytes
+    Attribute newSplatValue;
+    if (auto intAttr = dyn_cast<IntegerAttr>(splatValue))
+      newSplatValue =
+          IntegerAttr::get(newType.getElementType(), intAttr.getValue());
+    else if (auto floatAttr = dyn_cast<FloatAttr>(splatValue))
+      newSplatValue =
+          FloatAttr::get(newType.getElementType(), floatAttr.getValue());
+    else
+      return failure();
+
+    // Create the new SplatElementsAttr (for example I8 type) with preserved
+    // value bytes
+    value = SplatElementsAttr::get(newType, newSplatValue);
+  }
+
+  // Replace with the new operation using the updated tensor type
+  rewriter.replaceOpWithNewOp<tosa::ConstOp>(op, newType, value);
   return success();
 }
 
@@ -1104,7 +1184,8 @@ WhereConverter::matchAndRewrite(migraphx::WhereOp op, OpAdaptor adaptor,
   Value rawCond = adaptor.getCond();
   Value inA = adaptor.getInA();
   Value inB = adaptor.getInB();
-  Value cond = createCastOp(rewriter, loc, rewriter.getI1Type(), rawCond);
+  Value cond = createCastOp(rewriter, loc, rewriter.getI1Type(), rawCond,
+                            op.getCond().getType().getElementType());
   rewriter.replaceOpWithNewOp<tosa::SelectOp>(
       op, getTypeConverter()->convertType(op.getResult().getType()), cond, inA,
       inB);
@@ -1272,27 +1353,26 @@ LogicalResult MHALLaunchConverter::matchAndRewrite(
 
 void migraphx::populateMIGraphXToTosaConversionPatterns(
     RewritePatternSet &patterns, TypeConverter &typeConverter) {
-  patterns
-      .add<ConvConverter<ConvolutionOp>, ConvConverter<QuantConvolutionOp>,
-           DotConverter<DotOp>, DotConverter<QuantDotOp>, BroadcastConverter,
-           MultiBroadcastConverter, TransposeConverter, ReshapeConverter,
-           SliceConverter, ReduceMeanConverter, ReduceSumConverter,
-           TrivialConverter<AddOp, tosa::AddOp>,
-           TrivialConverter<SubOp, tosa::SubOp>,
-           TrivialConverter<PowOp, tosa::PowOp>, DivConverter, MulConverter,
-           TrivialConverter<AbsOp, tosa::AbsOp>,
-           TrivialConverter<CeilOp, tosa::CeilOp>,
-           TrivialConverter<ErfOp, tosa::ErfOp>,
-           TrivialConverter<ExpOp, tosa::ExpOp>,
-           TrivialConverter<FloorOp, tosa::FloorOp>,
-           TrivialConverter<LogOp, tosa::LogOp>,
-           TrivialConverter<RecipOp, tosa::ReciprocalOp>,
-           TrivialConverter<RsqrtOp, tosa::RsqrtOp>,
-           TrivialConverter<SigmoidOp, tosa::SigmoidOp>,
-           TrivialConverter<TanhOp, tosa::TanhOp>, DeQuantizeLinearConverter,
-           QuantizeLinearConverter, DeQuantizeLinearConverter, ConvertConverter,
-           NegConverter, ReluConverter, SoftmaxConverter, LiteralConverter,
-           ClipConverter, WhereConverter>(typeConverter, patterns.getContext());
+  patterns.add<ConvConverter<ConvolutionOp>, ConvConverter<QuantConvolutionOp>,
+               DotConverter<DotOp>, DotConverter<QuantDotOp>,
+               BroadcastConverter, MultiBroadcastConverter, TransposeConverter,
+               ReshapeConverter, SliceConverter, ReduceMeanConverter,
+               ReduceSumConverter, TrivialConverter<AddOp, tosa::AddOp>,
+               TrivialConverter<SubOp, tosa::SubOp>,
+               TrivialConverter<PowOp, tosa::PowOp>, DivConverter, MulConverter,
+               TrivialConverter<AbsOp, tosa::AbsOp>,
+               TrivialConverter<CeilOp, tosa::CeilOp>,
+               TrivialConverter<ErfOp, tosa::ErfOp>,
+               TrivialConverter<ExpOp, tosa::ExpOp>,
+               TrivialConverter<FloorOp, tosa::FloorOp>,
+               TrivialConverter<LogOp, tosa::LogOp>,
+               TrivialConverter<RecipOp, tosa::ReciprocalOp>,
+               TrivialConverter<RsqrtOp, tosa::RsqrtOp>,
+               TrivialConverter<SigmoidOp, tosa::SigmoidOp>,
+               TrivialConverter<TanhOp, tosa::TanhOp>, QuantizeLinearConverter,
+               DeQuantizeLinearConverter, ConvertConverter, NegConverter,
+               ReluConverter, SoftmaxConverter, LiteralConverter, ClipConverter,
+               WhereConverter>(typeConverter, patterns.getContext());
 }
 
 void mlir::migraphx::populateMIGraphXFuncBoundaryToTosaConversionPatterns(
