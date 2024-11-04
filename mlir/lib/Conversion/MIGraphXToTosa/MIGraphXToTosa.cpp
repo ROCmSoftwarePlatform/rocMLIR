@@ -123,6 +123,8 @@ static Value createCastOp(PatternRewriter &rewriter, Location loc,
   Value res;
   if (inputType.isUnsignedInteger() ||
       resElementTypeBeforeConvert.isUnsignedInteger()) {
+    assert(!inputType.isSignedInteger() &&
+           !resElementTypeBeforeConvert.isSignedInteger());
     res = rewriter
               .create<tosa::CustomOp>(loc, resType, "unsigned_cast", "rocmlir",
                                       "", input)
@@ -933,14 +935,17 @@ LogicalResult DeQuantizeLinearConverter::matchAndRewrite(
   Value output = op.getOutput();
   Location loc = op->getLoc();
 
-  Type outputType = getTypeConverter()->convertType(getShapedElementTy(output));
-  Value upcastInput = createCastOp(rewriter, loc, outputType, input,
-                                   op.getInput().getType().getElementType());
+  Type origOutputType = getShapedElementTy(output);
+  Type outputType = getTypeConverter()->convertType(origOutputType);
+  Value upcastInput =
+      createCastOp(rewriter, loc, outputType, input,
+                   op.getInput().getType().getElementType(), origOutputType);
 
   Value shifted = upcastInput;
   if (auto bias = adaptor.getBias()) {
-    Value upcastBias = createCastOp(rewriter, loc, outputType, bias,
-                                    op.getBias().getType().getElementType());
+    Value upcastBias =
+        createCastOp(rewriter, loc, outputType, bias,
+                     op.getBias().getType().getElementType(), origOutputType);
     shifted = createOpAndInfer<tosa::SubOp>(rewriter, loc, outputType,
                                             upcastInput, upcastBias);
   }
@@ -1034,8 +1039,9 @@ LogicalResult QuantizeLinearConverter::matchAndRewrite(
     result = createOpAndInfer<tosa::ClampOp>(
         rewriter, loc, biasType, result, minI.getSExtValue(),
         maxI.getSExtValue(), minFatt, maxFatt);
-    result = createCastOp(rewriter, loc, outputType, result,
-                          op.getBias().getType().getElementType());
+    result =
+        createCastOp(rewriter, loc, outputType, result,
+                     op.getBias().getType().getElementType(), origOutputType);
   }
   rewriter.replaceOp(op, result);
 
@@ -1046,8 +1052,10 @@ LogicalResult
 ConvertConverter::matchAndRewrite(migraphx::ConvertOp op, OpAdaptor adaptor,
                                   ConversionPatternRewriter &rewriter) const {
 
-  if (op.getInA().getType().getElementType().isUnsignedInteger() ||
-      op.getResult().getType().getElementType().isUnsignedInteger()) {
+  auto inputType = op.getInA().getType().getElementType();
+  auto outputType = op.getResult().getType().getElementType();
+  if (inputType.isUnsignedInteger() || outputType.isUnsignedInteger()) {
+    assert(!inputType.isSignedInteger() && !outputType.isSignedInteger());
     rewriter.replaceOpWithNewOp<tosa::CustomOp>(
         op, getTypeConverter()->convertType(op.getResult().getType()),
         "unsigned_cast", "rocmlir", "", adaptor.getInA());
