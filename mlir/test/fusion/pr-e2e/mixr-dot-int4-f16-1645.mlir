@@ -5,8 +5,8 @@
 module {
   func.func @mlir_unpack_int4_1645(%arg0: !migraphx.shaped<2x2xi8, 2x1>, %arg1: !migraphx.shaped<2x2x1x1x1x1xf16, 2x1x1x1x1x1>, %arg2: !migraphx.shaped<2x1xi8, 1x1>, %arg3: !migraphx.shaped<2x4xf16, 4x1>) -> !migraphx.shaped<4x4xf16, 4x1> // attributes {arch = "gfx90a:sramecc+:xnack-", kernel = "mixr", num_cu = 110 : i64} 
   {
-    %0 = migraphx.unpack %arg0 {axis = 1 : i64, isUnsigned = false} : <2x2xi8, 2x1> -> <2x4xi8, 4x1>
-    %1 = migraphx.unpack %arg2 {axis = 1 : i64, isUnsigned = false} : <2x1xi8, 1x1> -> <2x2xi8, 2x1>
+    %0 = migraphx.unpack %arg0 {axis = 1 : i64} : <2x2xi8, 2x1> -> <2x4xi8, 4x1>
+    %1 = migraphx.unpack %arg2 {axis = 1 : i64} : <2x1xi8, 1x1> -> <2x2xi8, 2x1>
     %2 = migraphx.reshape %arg1 {dims = [2, 2, 1, 1, 1, 1, 1]} : <2x2x1x1x1x1xf16, 2x1x1x1x1x1> -> <2x2x1x1x1x1x1xf16, 2x1x1x1x1x1x1>
     %3 = migraphx.multibroadcast %2 {out_dyn_dims = [], out_lens = [2, 2, 1, 1, 1, 1, 2]} : <2x2x1x1x1x1x1xf16, 2x1x1x1x1x1x1> -> <2x2x1x1x1x1x2xf16, 2x1x1x1x1x1x0>
     %4 = migraphx.reshape %3 {dims = [2, 4]} : <2x2x1x1x1x1x2xf16, 2x1x1x1x1x1x0> -> <2x4xf16, 4x1>

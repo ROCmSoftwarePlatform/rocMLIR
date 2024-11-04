@@ -255,7 +255,7 @@ LogicalResult ConvConverter<ConvType>::matchAndRewrite(
   SmallVector<int64_t> NCHW2NHWC{0, 2, 3, 1};
   SmallVector<int64_t> NHWC2NCHW{0, 3, 1, 2};
 
-  if (outElementTy.isInteger() && outElementTy.isUnsignedInteger())
+  if (outElementTy.isUnsignedInteger())
     return op.emitError("No support for unsigned convolution.\n");
 
   int dims = outputTy.getShape().size() - 2;
@@ -417,7 +417,7 @@ LogicalResult DotConverter<DotType>::matchAndRewrite(
   Type outElementTy = origOutputTy.getElementType();
   Type newOutElementTy = getTypeConverter()->convertType(outElementTy);
 
-  if (outElementTy.isInteger() && outElementTy.isUnsignedInteger())
+  if (outElementTy.isUnsignedInteger())
     return op.emitError("No support for unsigned dot product.\n");
 
   // check batch dimension. Tosa matmul only allow a single dimension for it,
@@ -834,9 +834,13 @@ DivConverter::matchAndRewrite(migraphx::DivOp op, OpAdaptor adaptor,
   auto inBTensor = cast<TypedValue<RankedTensorType>>(adaptor.getInB());
   Type elementType = inATensor.getType().getElementType();
   if (isa<IntegerType>(elementType)) {
-    auto origElementType = op.getInA().getType().getElementType();
+    auto origAElementType = op.getInA().getType().getElementType();
+    auto origBElementType = op.getInB().getType().getElementType();
     Value div;
-    if (origElementType.isUnsignedInteger()) {
+    if (origAElementType.isUnsignedInteger() ||
+        origBElementType.isUnsignedInteger()) {
+      if (origAElementType != origBElementType)
+        return op->emitError("Types of A and B must be the same");
       mlir::SmallVector<mlir::Value, 2> inputs = {inATensor, inBTensor};
       auto op = rewriter.create<tosa::CustomOp>(
           loc, inATensor.getType(), "unsigned_div", "rocmlir", "", inputs);
@@ -1071,7 +1075,7 @@ LogicalResult
 NegConverter::matchAndRewrite(migraphx::NegOp op, OpAdaptor adaptor,
                               ConversionPatternRewriter &rewriter) const {
   auto outElementType = op.getResult().getType().getElementType();
-  if (outElementType.isInteger() && outElementType.isUnsignedInteger())
+  if (outElementType.isUnsignedInteger())
     return op.emitOpError("can't negate an unsigned int type");
 
   rewriter.replaceOpWithNewOp<tosa::NegateOp>(
