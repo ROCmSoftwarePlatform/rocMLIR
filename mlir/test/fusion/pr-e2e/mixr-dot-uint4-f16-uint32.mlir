@@ -17,7 +17,7 @@ module {
     %9 = migraphx.transpose %8 {permutation = [1, 0]} : <2x4xf16, 4x1> -> <4x2xf16, 1x4>
     %10 = migraphx.dot %9, %arg3 : <4x2xf16, 1x4>, <2x4xf16, 4x1> -> <4x4xf16, 4x1>
     %11 = migraphx.relu %10 : <4x4xf16, 4x1> -> <4x4xf16, 4x1>
-    %12 = migraphx.convert %11 : <4x4xf16, 4x1> to <4x4xui32, 4x1>    
+    %12 = migraphx.convert %11 : <4x4xf16, 4x1> to <4x4xui32, 4x1>
     %13 = migraphx.literal (dense<1> : tensor<1xui8>) : <1xui8, 0>
     %14 = migraphx.multibroadcast %13 {out_dyn_dims = [], out_lens = [4, 4]} : <1xui8, 0> -> <4x4xui8, 0x0>
     %15 = migraphx.literal (dense<1.0> : tensor<1xf16>) : <1xf16, 0>
