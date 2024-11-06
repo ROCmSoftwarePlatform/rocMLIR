@@ -240,8 +240,7 @@ LogicalResult ConvConverter<ConvType>::matchAndRewrite(
   Type newOutTy = RankedTensorType::get(newShape, outputTy.getElementType());
 
   // There is no tosa.conv1d, so instead we'll add a dummy x1 dimension
-  // to the input tensors, and make a tosa.conv2d.  We'll also add the
-  // ExpandedFrom1D attribute so we can undo it in tosa-to-rock.
+  // to the input tensors, and make a tosa.conv2d.
   auto expandTo2D = [&rewriter, loc](mlir::Value value) {
     ArrayRef<int64_t> origShape = cast<ShapedType>(value.getType()).getShape();
     SmallVector<int64_t> expShape(origShape.drop_back());
@@ -270,8 +269,6 @@ LogicalResult ConvConverter<ConvType>::matchAndRewrite(
             getZeroTensor(loc, outputTy.getElementType(),
                           cast<ShapedType>(filter.getType()).getShape()[0],
                           rewriter)});
-    cop->setAttr(rock::ExpandedFrom1DAttr::getMnemonic(),
-                 rewriter.getUnitAttr());
     break;
 
   case 2:

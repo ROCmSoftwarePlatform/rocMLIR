@@ -472,11 +472,6 @@ def Rock_EnableSplitKForTuning : Rock_Attr<"EnableSplitKForTuning"> {
   let mnemonic = "enable_splitk_for_tuning";
 }
 
-// Used when converting 1-dimensional migraphx.convolution to tosa.conv2d
-def Rock_ExpandedFrom1D : Rock_Attr<"ExpandedFrom1D"> {
-  let mnemonic = "expanded_from_1d";
-}
-
 def Rock_PrefillAttr : Rock_Attr<"Prefill"> {
   let mnemonic = "rock.prefill";
 
