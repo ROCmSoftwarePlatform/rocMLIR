@@ -326,7 +326,7 @@ LogicalResult ConvConverter<ConvType>::matchAndRewrite(
       return op->emitError(
           "1-D convolution has improper dilation, stride, or pad.");
     }
-    dilations.push_back(0);
+    dilations.push_back(1);
     strides.push_back(1);
     pads.push_back(0);
     pads.push_back(0);
