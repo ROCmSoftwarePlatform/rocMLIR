@@ -5,7 +5,7 @@
 // CHECK-NEXT: [1.3125, 0.84375, 1.6875, 1.59375, 1.59375, 0.5625, 3.09375, 1.40625, 1.6875, 0.65625, 2.4375, 1.3125, 1.96875, 0.9375, 1.5, 0.5625, 0.5625, 3.1875, 0.5625, 1.03125, 3.375, 0.9375, 2.34375, 2.8125, 3.09375, 2.8125, 1.6875, 1.59375, 0.65625, 3.09375, 1.40625, 2.90625, 0.84375, 1.40625, 2.34375, 1.40625, 2.0625, 3.28125, 2.625, 2.8125, 1.03125, 2.53125, 3.375, 2.71875, 1.40625, 2.25, 2.625, 0.84375, 2.53125]
 // COM: tests fail is they have no arguments, that's why we have %dummy
 module {
-  func.func @mlir_dequantizelinear_convolution_quantizelinear(%dummy : !migraphx.shaped<9x8xi8, 8x1>) -> !migraphx.shaped<1x1x7x7xf32, 49x49x7x1> attributes {arch = "gfx942:sramecc+:xnack-", kernel = "mixr", num_cu = 304 : i64} {
+  func.func @mlir_dequantizelinear_convolution_quantizelinear(%dummy : !migraphx.shaped<9x8xi8, 8x1>) -> !migraphx.shaped<1x1x7x7xf32, 49x49x7x1> {
     %arg0 = migraphx.literal (dense<[-7, -12, -3, -4, -4, -15, 12, -6, -3, -14, 5, -7, 0, -11, -5, -15, -15, 13, -15, -10, 15, -11, 4, 9, 12, 9, -3, -4, -14, 12, -6, 10, -12, -6, 4, -6, 1, 14, 7, 9, -10, 6, 15, 8, -6, 3, 7, -12, 6]> : tensor<49xsi8>) : <49xsi8, 1>
     %arg1 = migraphx.literal (dense<0.375> : tensor<1xf32>) : <1xf32, 1>
     %arg2 = migraphx.literal (dense<-21> : tensor<1xsi8>) : <1xsi8, 1>
