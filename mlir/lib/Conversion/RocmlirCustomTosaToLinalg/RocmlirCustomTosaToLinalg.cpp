@@ -104,8 +104,7 @@ void mlir::rock::populateRocmlirCustomTosaToLinalgTarget(
     ConversionTarget &target) {
   target.addLegalOp<linalg::GenericOp, linalg::YieldOp, arith::ExtUIOp,
                     arith::TruncIOp, arith::DivUIOp, arith::FPToUIOp,
-                    arith::UIToFPOp, arith::MinUIOp, arith::MaxUIOp,
-                    tensor::EmptyOp>();
+                    arith::UIToFPOp, tensor::EmptyOp>();
   target.addDynamicallyLegalOp<tosa::CustomOp>(
       [](tosa::CustomOp op) { return op.getDomainName() != "rocmlir"; });
 }
