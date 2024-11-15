@@ -117,8 +117,8 @@ module  {
   // CHECK-LABEL: func @quantize_scale_bias
   // CHECK: tosa.reciprocal
   // CHECK: tosa.mul
-  // CHECK: tosa.cast{{.*}}i8{{.*}}i32
   // CHECK: tosa.cast{{.*}}f32{{.*}}i32
+  // CHECK: tosa.cast{{.*}}i8{{.*}}i32
   // CHECK: tosa.add
   // CHECK: tosa.clamp
   // CHECK-SAME: max_int = 127
@@ -132,8 +132,8 @@ module  {
   // CHECK-LABEL: func @quantize_scale_bias_fp8
   // CHECK: tosa.reciprocal
   // CHECK: tosa.mul
-  // CHECK: tosa.cast{{.*}}f8E4M3FNUZ{{.*}}f32
   // CHECK: tosa.cast{{.*}}f32{{.*}}f32
+  // CHECK: tosa.cast{{.*}}f8E4M3FNUZ{{.*}}f32
   // CHECK: tosa.add
   // CHECK: tosa.clamp
   // CHECK-SAME: max_fp = 2.400000e+02
@@ -147,8 +147,8 @@ module  {
   // CHECK-LABEL: func @quantize_scale_bias_fp8_ocp
   // CHECK: tosa.reciprocal
   // CHECK: tosa.mul
-  // CHECK: tosa.cast{{.*}}f8E4M3FN{{.*}}f32
   // CHECK: tosa.cast{{.*}}f32{{.*}}f32
+  // CHECK: tosa.cast{{.*}}f8E4M3FN{{.*}}f32
   // CHECK: tosa.add
   // CHECK: tosa.clamp
   // CHECK-SAME: max_fp = 4.480000e+02
@@ -162,8 +162,8 @@ module  {
   // CHECK-LABEL: func @quantize_scale_bias_f16
   // CHECK: tosa.reciprocal
   // CHECK: tosa.mul
-  // CHECK: tosa.cast{{.*}}i8{{.*}}i32
   // CHECK: tosa.cast{{.*}}f16{{.*}}i32
+  // CHECK: tosa.cast{{.*}}i8{{.*}}i32
   // CHECK: tosa.add
   // CHECK: tosa.clamp
   // CHECK: tosa.cast

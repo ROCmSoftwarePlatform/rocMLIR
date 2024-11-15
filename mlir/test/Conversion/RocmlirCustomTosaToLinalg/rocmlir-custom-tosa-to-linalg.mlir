@@ -99,26 +99,3 @@ func.func @unsigned_div(%arg0: tensor<1x36x384x64xi32>, %arg1: tensor<1x36x384x6
   %out = tosa.custom %arg0, %arg1 {domain_name = "rocmlir", implementation_attrs = "", operator_name = "unsigned_div"} : (tensor<1x36x384x64xi32>, tensor<1x36x384x64xi32>) -> tensor<1x36x384x64xi32>
   func.return %out : tensor<1x36x384x64xi32>
 }
-
-// -----
-
-// CHECK-LABEL: @unsigned_clamp
-// CHECK-SAME: (%[[arg0:.+]]: tensor<1x1x7x7xi32>)
-// CHECK: %[[min:.+]] = arith.constant dense<0> : tensor<1x1x7x7xi32>
-// CHECK: %[[max:.+]] = arith.constant dense<255> : tensor<1x1x7x7xi32>
-// CHECK: %[[empty:.+]] = tensor.empty() : tensor<1x1x7x7xi32>
-// CHECK: %[[ret:.+]] = linalg.generic
-// CHECK-SAME: ins(%[[arg0]], %[[min]], %[[max]] : tensor<1x1x7x7xi32>, tensor<1x1x7x7xi32>, tensor<1x1x7x7xi32>)
-// CHECK-SAME: outs(%[[empty]] : tensor<1x1x7x7xi32>)
-// CHECK-NEXT: %[[in:.+]]: i32, %[[in1:.+]]: i32, %[[in2:.+]]: i32, %[[out:.+]]: i32
-// CHECK-NEXT: %[[res:.+]] = arith.maxui %[[in]], %[[in1]] : i32
-// CHECK-NEXT: %[[res2:.+]] = arith.minui %[[res]], %[[in2]] : i32
-// CHECK-NEXT: linalg.yield %[[res2]]
-// CHECK-NEXT: -> tensor<1x1x7x7xi32>
-// CHECK-NEXT: return %[[ret]]
-func.func @unsigned_clamp(%arg0: tensor<1x1x7x7xi32>) -> tensor<1x1x7x7xi32> {
-  %cst = arith.constant dense<0> : tensor<1x1x7x7xi32>
-  %cst_0 = arith.constant dense<255> : tensor<1x1x7x7xi32>
-  %1 = tosa.custom %arg0, %cst, %cst_0 {domain_name = "rocmlir", implementation_attrs = "", operator_name = "unsigned_clamp"} : (tensor<1x1x7x7xi32>, tensor<1x1x7x7xi32>, tensor<1x1x7x7xi32>) -> tensor<1x1x7x7xi32>
-  func.return %1 : tensor<1x1x7x7xi32>
-}

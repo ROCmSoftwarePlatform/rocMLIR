@@ -2,7 +2,7 @@
 // ALLOW_RETRIES: 2
 // CHECK: [1 1 1]
 // CHECK-NEXT: Unranked Memref base@ = {{.*}} rank = 1 offset = 0 sizes = [49] strides = [1] data =
-// CHECK-NEXT: [19, 22, 17, 18, 18, 23, 10, 18, 17, 22, 13, 19, 16, 21, 18, 23, 23, 9, 23, 20, 8, 21, 14, 11, 10, 11, 17, 18, 22, 10, 18, 10, 22, 18, 14, 18, 15, 8, 12, 11, 20, 12, 8, 12, 18, 14, 12, 22, 12]
+// CHECK-NEXT: [1, 4, 0, 0, 0, 5, 0, 0, 0, 4, 0, 1, 0, 3, 0, 5, 5, 0, 5, 2, 0, 3, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 4, 0]
 // COM: tests fail is they have no arguments, that's why we have %dummy
 module {
   func.func @mlir_dequantizelinear_convolution_quantizelinear(%dummy : !migraphx.shaped<9x8xi8, 8x1>) -> !migraphx.shaped<1x1x7x7xui8, 49x49x7x1> attributes {arch = "gfx942:sramecc+:xnack-", kernel = "mixr", num_cu = 304 : i64} {
@@ -10,7 +10,6 @@ module {
     %arg1 = migraphx.literal (dense<0.375> : tensor<1xf32>) : <1xf32, 1>
     %arg2 = migraphx.literal (dense<21> : tensor<1xui8>) : <1xui8, 1>
     %arg3 = migraphx.literal (dense<0.1875> : tensor<1x1x7x7xf32>) : <1x1x7x7xf32, 7x7x7x1>
-    %arg4 = migraphx.literal (dense<18> : tensor<1x1x7x7xui8>) : <1x1x7x7xui8, 7x7x7x1>
     %arg5 = migraphx.literal (dense<0.25> : tensor<1x1x1x1xf32>) : <1x1x1x1xf32, 1x1x1x1>
 
     %arg0_reshaped = migraphx.reshape %arg0 {dims = [1, 1, 7, 7]} : <49xui8, 1> -> <1x1x7x7xui8, 49x49x7x1>
@@ -18,7 +17,7 @@ module {
     %1 = migraphx.multibroadcast %arg2 {out_dyn_dims = [], out_lens = [1, 1, 7, 7]} : <1xui8, 1> -> <1x1x7x7xui8, 0x0x0x0>
     %2 = migraphx.dequantizelinear %arg0_reshaped, %0, %1 : <1x1x7x7xui8, 49x49x7x1>, <1x1x7x7xf32, 0x0x0x0>, !migraphx.shaped<1x1x7x7xui8, 0x0x0x0> -> <1x1x7x7xf32, 49x49x7x1>
     %3 = migraphx.convolution %2, %arg5 {dilation = [1, 1], group = 1 : i64, padding = [0, 0, 0, 0], padding_mode = 0 : i64, stride = [1, 1]} : <1x1x7x7xf32, 49x49x7x1>, <1x1x1x1xf32, 1x1x1x1> -> <1x1x7x7xf32, 49x49x7x1>
-    %4 = migraphx.quantizelinear %3, %arg3, %arg4 : <1x1x7x7xf32, 49x49x7x1>, <1x1x7x7xf32, 7x7x7x1>, !migraphx.shaped<1x1x7x7xui8, 7x7x7x1> -> <1x1x7x7xui8, 49x49x7x1>
+    %4 = migraphx.quantizelinear %3, %arg3 : <1x1x7x7xf32, 49x49x7x1>, <1x1x7x7xf32, 7x7x7x1> -> <1x1x7x7xui8, 49x49x7x1>
     return %4 : !migraphx.shaped<1x1x7x7xui8, 49x49x7x1>
   }
 }

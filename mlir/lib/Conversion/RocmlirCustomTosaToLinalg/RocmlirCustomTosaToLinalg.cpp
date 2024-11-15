@@ -50,10 +50,9 @@ LogicalResult UnsignedCastLoweringPattern::matchAndRewrite(
   if (op.getDomainName() != "rocmlir")
     return rewriter.notifyMatchFailure(op, "domain isn't rocmlir");
   if (op.getOperatorName() != "unsigned_cast" &&
-      op.getOperatorName() != "unsigned_div" &&
-      op.getOperatorName() != "unsigned_clamp")
+      op.getOperatorName() != "unsigned_div")
     return rewriter.notifyMatchFailure(
-        op, "isn't an unsigned_cast or unsigned_div or unsigned_clamp");
+        op, "isn't an unsigned_cast or unsigned_div");
 
   Location loc = op.getLoc();
   auto outType = cast<RankedTensorType>(op.getResults().front().getType());
@@ -94,15 +93,6 @@ LogicalResult UnsignedCastLoweringPattern::matchAndRewrite(
           assert(inputs.size() == 3);
           result =
               b.create<arith::DivUIOp>(loc, outElemType, inputs[0], inputs[1]);
-        } else if (op.getOperatorName() == "unsigned_clamp") {
-          assert(isa<IntegerType>(outElemType));
-          assert(isa<IntegerType>(inElemType));
-          assert(inputs.size() == 4);
-
-          result =
-              b.create<arith::MaxUIOp>(loc, outElemType, inputs[0], inputs[1]);
-          result =
-              b.create<arith::MinUIOp>(loc, outElemType, result, inputs[2]);
         }
         b.create<linalg::YieldOp>(loc, result);
       });
