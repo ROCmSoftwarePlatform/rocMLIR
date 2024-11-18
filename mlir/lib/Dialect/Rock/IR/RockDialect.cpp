@@ -2098,6 +2098,29 @@ LogicalResult AttentionOp::verify() {
   if (keyN != valueK) {
     return emitError("reduction dimensions of second gemm do not match");
   }
+  
+  // check output type
+  ShapedType oType = getOut().getType();
+  int64_t oBatchDim = oType.getShape().size() == 3 ? oType.getShape()[0] : 1;
+
+  ArrayRef<int64_t> oLastDims = oType.getShape().slice(oType.getRank() - 2);
+  auto [outputSeqLen, outputHeadDim] =
+      getOTransposed() ? std::tuple{oLastDims[1], oLastDims[0]}
+                       : std::tuple{oLastDims[0], oLastDims[1]};
+
+  if (qType.getShape().size() != oType.getShape().size()) {
+    return emitError("Number of dimensions do not match (Q and Output)");
+  }
+  if (qBatchDim != oBatchDim) {
+    return emitError("Batch dimensions do not match (Q and Output)");
+  }
+  if (queryM != outputSeqLen) {
+    return emitError("Sequence length does not match (Q and Output)");
+  }
+  if (valueN != outputHeadDim) {
+    return emitError("Head dimensions do not match (V and Output)");
+  }
+
   return success();
 }
 

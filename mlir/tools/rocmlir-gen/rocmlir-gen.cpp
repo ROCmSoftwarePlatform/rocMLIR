@@ -508,6 +508,14 @@ static llvm::cl::opt<bool> emitTuningKey(
 // Attention related args
 // ----------------------
 
+static llvm::cl::opt<int64_t> numHeadsQ(
+    "num_heads_q", llvm::cl::desc("number of heads of Q in attention()"),
+    llvm::cl::value_desc("positive integer"), llvm::cl::init(1));
+
+static llvm::cl::opt<int64_t> numHeadsKV(
+    "num_heads_kv", llvm::cl::desc("number of heads of K,V in attention()"),
+    llvm::cl::value_desc("positive integer"), llvm::cl::init(1));
+
 static llvm::cl::opt<int64_t> sequenceLengthQ(
     "seq_len_q", llvm::cl::desc("sequence length of Q in attention()"),
     llvm::cl::value_desc("positive integer"), llvm::cl::init(-1));
@@ -1025,6 +1033,8 @@ static void populateDefaults() {
       groupSize = 1;
       sequenceLengthQ = 1024;
       sequenceLengthK = 1024;
+      numHeadsQ = 1;
+      numHeadsKV = 1;
       headDimQK = 32;
       headDimV = 32;
     }
@@ -2156,14 +2166,14 @@ static func::FuncOp createGpuGemmKernel(ModuleOp module,
 
 static void getAttentionTypes(SmallVectorImpl<Type> &result,
                               ArrayRef<Type> elemTypes) {
-  SmallVector<int64_t> qDims{groupSize, sequenceLengthQ, headDimQK};
-  SmallVector<int64_t> transposedQDims{groupSize, headDimQK, sequenceLengthQ};
-  SmallVector<int64_t> kDims{groupSize, sequenceLengthK, headDimQK};
-  SmallVector<int64_t> transposedKDims{groupSize, headDimQK, sequenceLengthK};
-  SmallVector<int64_t> vDims{groupSize, sequenceLengthK, headDimV};
-  SmallVector<int64_t> transposedVDims{groupSize, headDimV, sequenceLengthK};
-  SmallVector<int64_t> oDims{groupSize, sequenceLengthQ, headDimV};
-  SmallVector<int64_t> transposedODims{groupSize, headDimV, sequenceLengthQ};
+  SmallVector<int64_t> qDims{groupSize*numHeadsQ, sequenceLengthQ, headDimQK};
+  SmallVector<int64_t> transposedQDims{groupSize*numHeadsQ, headDimQK, sequenceLengthQ};
+  SmallVector<int64_t> kDims{groupSize*numHeadsKV, sequenceLengthK, headDimQK};
+  SmallVector<int64_t> transposedKDims{groupSize*numHeadsKV, headDimQK, sequenceLengthK};
+  SmallVector<int64_t> vDims{groupSize*numHeadsKV, sequenceLengthK, headDimV};
+  SmallVector<int64_t> transposedVDims{groupSize*numHeadsKV, headDimV, sequenceLengthK};
+  SmallVector<int64_t> oDims{groupSize*numHeadsQ, sequenceLengthQ, headDimV};
+  SmallVector<int64_t> transposedODims{groupSize*numHeadsQ, headDimV, sequenceLengthQ};
   bool isQuantized =
       elemTypes[0] == IntegerType::get(elemTypes[0].getContext(), 8);
 
@@ -2202,13 +2212,25 @@ static void getAttentionTypes(SmallVectorImpl<Type> &result,
     result.push_back(qsType);
   }
   if (hasAttnScale) {
-    SmallVector<int64_t> scaleDims{groupSize, sequenceLengthQ, sequenceLengthK};
+<<<<<<< HEAD
+    SmallVector<int64_t> scaleDims{groupSize*numHeadsQ, sequenceLengthQ, sequenceLengthK};
     MemRefType sType = MemRefType::get(scaleDims, elemTypes[scaleIndex]);
     result.push_back(sType);
   }
   if (hasAttnBias) {
-    SmallVector<int64_t> biasDims{groupSize, sequenceLengthQ, sequenceLengthK};
+    SmallVector<int64_t> biasDims{groupSize*numHeadsQ, sequenceLengthQ, sequenceLengthK};
     MemRefType bType = MemRefType::get(biasDims, elemTypes[biasIndex]);
+=======
+    SmallVector<int64_t> scaleDims{groupSize*numHeadsQ, sequenceLengthQ, sequenceLengthK};
+    MemRefType sType =
+        MemRefType::get(scaleDims, elemTypes[optionalArgsCounter++]);
+    result.push_back(sType);
+  }
+  if (hasAttnBias) {
+    SmallVector<int64_t> biasDims{groupSize*numHeadsQ, sequenceLengthQ, sequenceLengthK};
+    MemRefType bType =
+        MemRefType::get(biasDims, elemTypes[optionalArgsCounter++]);
+>>>>>>> 88a54130ee7b (Add GQA support for rocmlir-gen and add GQA tests)
     result.push_back(bType);
   }
   MemRefType outType = MemRefType::get(transposeO ? transposedODims : oDims,
@@ -2278,6 +2300,71 @@ Value addTensorArgToBlock(OpBuilder &builder, Location loc,
   return funcArgTensor;
 }
 
+static Value broadcastGQATosa(OpBuilder builder, Location loc, Value inputTensor) {
+  assert(numHeadsQ % numHeadsKV == 0);
+
+  if (numHeadsQ == numHeadsKV)
+    return inputTensor;
+
+  int64_t numRepeat = numHeadsQ / numHeadsKV;
+
+  auto inpType = cast<RankedTensorType>(inputTensor.getType());
+  ArrayRef<int64_t> inpShape = inpType.getShape();
+  
+  // add one dimension
+  SmallVector<ReassociationIndices> reassocIndices = {{0, 1}, {2}, {3}};
+  SmallVector<int64_t> expandedShape = {inpShape[0], 1, inpShape[1], inpShape[2]};
+  auto newType = RankedTensorType::get(expandedShape, inpType.getElementType());
+  auto expandedValue =
+      builder.create<tensor::ExpandShapeOp>(loc, newType, inputTensor, reassocIndices);
+
+  // broadcast
+  SmallVector<int64_t, 4> outShape = {inpShape[0], numRepeat, inpShape[1], inpShape[2]};
+  auto outType = RankedTensorType::get(outShape, inpType.getElementType());
+
+  auto zeroValue = cast<ElementsAttr>(builder.getZeroAttr(outType));
+  auto zeroTensor = builder.create<tosa::ConstOp>(loc, outType, zeroValue);
+  auto addWithZero = createOpAndInfer<tosa::AddOp>(
+    builder, loc, inpType.getElementType(), zeroTensor, expandedValue);
+
+  // collapse
+  return
+      builder.create<tensor::CollapseShapeOp>(loc, addWithZero,
+                                                reassocIndices);
+  
+}
+
+static Value broadcastGQARock(OpBuilder builder, Location loc, Value inputTensor) {
+  assert(numHeadsQ % numHeadsKV == 0);
+
+  if (numHeadsQ == numHeadsKV)
+    return inputTensor;
+
+  int64_t numRepeats = numHeadsQ / numHeadsKV;
+  ArrayRef<int64_t> inpShape = cast<ShapedType>(inputTensor.getType()).getShape();
+  SmallVector<StringRef> startNames = {"gemmG", "seqLen", "headDim"};
+  rock::BottomUpTMBuilder addDim(builder, startNames, inpShape);
+  addDim.addDim("broadcastDim", 1, 1);
+  addDim.passThrough({0, 2, 3}, {0, 1, 2});
+  auto addDimAttr = addDim.get();
+  Value matrixAddDim = builder.create<rock::TransformOp>(loc, inputTensor, addDimAttr);
+
+  auto broadcaster =
+      rock::BottomUpTMBuilder::above(addDim, addDimAttr);
+  broadcaster.broadcast({1}, {numRepeats});
+  broadcaster.passThrough({0, 2, 3}, {0, 2, 3});
+  auto broadcasterAttr = broadcaster.get();
+  Value tensorBroadcast = builder.create<rock::TransformOp>(loc, matrixAddDim, broadcasterAttr);
+
+  auto merger =
+      rock::BottomUpTMBuilder::above(broadcaster, broadcasterAttr);
+  merger.merge("gemmG", 0, {"gemmG", "broadcastDim"});
+  merger.passThrough({1, 2}, {2, 3});
+  auto mergerAttr = merger.get();
+  auto tmp = builder.create<rock::TransformOp>(loc, tensorBroadcast, mergerAttr);
+  return tmp;
+}
+
 static func::FuncOp createGpuAttentionKernel(ModuleOp module,
                                              const GenParams &params) {
   MLIRContext *ctx = module.getContext();
@@ -2343,6 +2430,9 @@ static func::FuncOp createGpuAttentionKernel(ModuleOp module,
     elemwiseInputs.push_back(bias);
   }
   output = unflattenedArgs[optionalArgsCounter];
+
+  keys = broadcastGQARock(builder, loc, keys);
+  values = broadcastGQARock(builder, loc, values);
 
   IntegerAttr numCUAttr =
       (num_cu.getNumOccurrences() > 0 ? builder.getI32IntegerAttr(num_cu)
@@ -2575,12 +2665,17 @@ static func::FuncOp createCpuAttentionKernelWithMlir(ModuleOp module,
   if (transposeV) {
     valuesTensor = transposeMatrix(builder, loc, valuesTensor, {0, 2, 1});
   }
+  // GQA
+  keysTensor = broadcastGQATosa(builder, loc, keysTensor);
+  valuesTensor = broadcastGQATosa(builder, loc, valuesTensor);
+
   Type firstGemmOutElemType = params.types[0];
   if (isQuantized) {
     firstGemmOutElemType = IntegerType::get(ctx, 32);
   }
   Value qkTensor = createOpAndInfer<tosa::MatMulOp>(
       builder, loc, firstGemmOutElemType, queriesTensor, keysTensor);
+
   unsigned optionalArgsCounter = 3;
   if (isQuantized) {
     auto quantBiasI8 = getTensorForBlockArg(optionalArgsCounter++);
@@ -2632,9 +2727,11 @@ static func::FuncOp createCpuAttentionKernelWithMlir(ModuleOp module,
 #ifdef ROCK_DEBUG_ATTENTION_REMOVE_SOFTMAX
   softmaxTensor = qkTensor;
 #endif
+  auto resultOutElementType = cast<ShapedType>(softmaxTensor.getType()).getElementType();
   Value resultTensor = createOpAndInfer<tosa::MatMulOp>(
-      builder, loc, cast<ShapedType>(softmaxTensor.getType()).getElementType(),
+      builder, loc, resultOutElementType,
       softmaxTensor, valuesTensor);
+
   if (transposeO) {
     resultTensor = transposeMatrix(builder, loc, resultTensor, {0, 2, 1});
   }

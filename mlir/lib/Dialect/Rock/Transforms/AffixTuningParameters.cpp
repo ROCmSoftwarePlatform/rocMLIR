@@ -246,8 +246,7 @@ void AffixTuningParameters::affixTuningParametersImpl(AttentionOp op) {
   if (!isAccel) {
     op.emitError("Currently, attention op is only supported on GPUs "
                  "with matrix accelerator extentions");
-    signalPassFailure();
-    return;
+    return signalPassFailure();
   }
   Attribute params0 = op.getParams0().value_or(nullptr);
   // set a default one if params is not provided
@@ -262,6 +261,7 @@ void AffixTuningParameters::affixTuningParametersImpl(AttentionOp op) {
   auto attnPerfConfig = AttnPerfConfigAttr::get(perfConfigStrAttr);
   if (!attnPerfConfig) {
     op.emitError("perf config string has an incorrect format.");
+    return signalPassFailure();
   }
   GemmFeatures features = op.getFeatures();
   RockAccelTuningParamAttrInterface accelParams0;
@@ -283,8 +283,7 @@ void AffixTuningParameters::affixTuningParametersImpl(AttentionOp op) {
   if (attnPerfConfig.getMPerBlockG0() > attnPerfConfig.getMPerBlockG1()) {
     op.emitError(
         "The MPerBlockG0 should be larger or equal to getMPerBlockG1.");
-    signalPassFailure();
-    return;
+    return signalPassFailure();
   }
   RockAccelTuningParamAttrInterface accelParams1 =
       deriveGemm1TuningParams(builder, op, attnPerfConfig);
@@ -308,8 +307,7 @@ void AffixTuningParameters::affixTuningParametersImpl(AttentionOp op) {
           /*enableDPerWaveFiltering=*/false);
   if (isValidBlockwiseGemm0.failed() || isValidBlockwiseGemm1.failed()) {
     op.emitError("The provided perf config is not valid");
-    signalPassFailure();
-    return;
+    return signalPassFailure();
   }
 
   IntegerAttr blockSizeAttr = builder.getI32IntegerAttr(blockSize);
