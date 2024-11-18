@@ -2098,7 +2098,7 @@ LogicalResult AttentionOp::verify() {
   if (keyN != valueK) {
     return emitError("reduction dimensions of second gemm do not match");
   }
-  
+
   // check output type
   ShapedType oType = getOut().getType();
   int64_t oBatchDim = oType.getShape().size() == 3 ? oType.getShape()[0] : 1;
