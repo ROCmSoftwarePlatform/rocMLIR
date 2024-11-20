@@ -518,6 +518,12 @@ static llvm::cl::opt<int64_t>
                llvm::cl::desc("number of heads of K,V in attention()"),
                llvm::cl::value_desc("positive integer"), llvm::cl::init(1));
 
+static llvm::cl::opt<int64_t>
+    currentSeqLen("current_seq_len",
+                  llvm::cl::desc("current sequence length of K and V (this is "
+                                 "related to KV-cache) in attention()"),
+                  llvm::cl::value_desc("positive integer"), llvm::cl::init(-1));
+
 static llvm::cl::opt<int64_t> sequenceLengthQ(
     "seq_len_q", llvm::cl::desc("sequence length of Q in attention()"),
     llvm::cl::value_desc("positive integer"), llvm::cl::init(-1));
@@ -2295,6 +2301,30 @@ Value addTensorArgToBlock(OpBuilder &builder, Location loc,
   return funcArgTensor;
 }
 
+static Value sliceKVCacheTosa(OpBuilder builder, Location loc,
+                              Value inputTensor, int64_t currentSeqLen,
+                              int64_t axis) {
+  auto inpType = cast<RankedTensorType>(inputTensor.getType());
+  ArrayRef<int64_t> inpShape = inpType.getShape();
+
+  assert(axis == 1 || axis == 2);
+  assert(currentSeqLen > 0 && currentSeqLen <= inpShape[axis]);
+
+  if (currentSeqLen == inpShape[1])
+    return inputTensor;
+
+  llvm::SmallVector<int64_t, 4> sliceStart = {0, 0, 0};
+  llvm::SmallVector<int64_t, 4> sliceSizeAxis1 = {inpShape[0], currentSeqLen,
+                                                  inpShape[2]};
+  llvm::SmallVector<int64_t, 4> sliceSizeAxis2 = {inpShape[0], inpShape[1],
+                                                  currentSeqLen};
+  auto sliceSize = (axis == 1) ? builder.getDenseI64ArrayAttr(sliceSizeAxis1)
+                               : builder.getDenseI64ArrayAttr(sliceSizeAxis2);
+  return createOpAndInfer<tosa::SliceOp>(
+      builder, loc, inpType.getElementType(), inputTensor,
+      builder.getDenseI64ArrayAttr(sliceStart), sliceSize);
+}
+
 static Value broadcastGQATosa(OpBuilder builder, Location loc,
                               Value inputTensor) {
   assert(numHeadsQ % numHeadsKV == 0);
@@ -2433,13 +2463,19 @@ static func::FuncOp createGpuAttentionKernel(ModuleOp module,
   keys = broadcastGQARock(builder, loc, keys);
   values = broadcastGQARock(builder, loc, values);
 
+  // init current_seq_len (KV Cache)
+  Value currSeqLen = mlir::TypedValue<IndexType>{};
+  if (currentSeqLen != -1) {
+    currSeqLen = builder.create<arith::ConstantIndexOp>(loc, currentSeqLen);
+  }
+
   IntegerAttr numCUAttr =
       (num_cu.getNumOccurrences() > 0 ? builder.getI32IntegerAttr(num_cu)
                                       : nullptr);
   auto attention = builder.create<rock::AttentionOp>(
-      loc, TypeRange{}, queries, keys, values, elemwiseInputs, output,
-      transposeQ, transposeK, transposeV, transposeO, archAttr, params.features,
-      numCUAttr,
+      loc, TypeRange{}, queries, keys, values, elemwiseInputs, currSeqLen,
+      output, transposeQ, transposeK, transposeV, transposeO, archAttr,
+      params.features, numCUAttr,
       /*params0=*/nullptr, /*params1=*/nullptr, /*firstGemmIdx=*/0);
   {
     Block *preSoftmaxElemwiseBlock =
@@ -2668,6 +2704,14 @@ static func::FuncOp createCpuAttentionKernelWithMlir(ModuleOp module,
   keysTensor = broadcastGQATosa(builder, loc, keysTensor);
   valuesTensor = broadcastGQATosa(builder, loc, valuesTensor);
 
+  // slice K and V (KV Cache)
+  if (currentSeqLen != -1) {
+    keysTensor =
+        sliceKVCacheTosa(builder, loc, keysTensor, currentSeqLen, /*axis=*/2);
+    valuesTensor =
+        sliceKVCacheTosa(builder, loc, valuesTensor, currentSeqLen, /*axis=*/1);
+  }
+
   Type firstGemmOutElemType = params.types[0];
   if (isQuantized) {
     firstGemmOutElemType = IntegerType::get(ctx, 32);
@@ -2691,6 +2735,10 @@ static func::FuncOp createCpuAttentionKernelWithMlir(ModuleOp module,
   }
   if (hasAttnScale) {
     auto scaleTensor = getTensorForBlockArg(optionalArgsCounter++);
+    if (currentSeqLen != -1) {
+      scaleTensor = sliceKVCacheTosa(builder, loc, scaleTensor, currentSeqLen,
+                                     /*axis=*/2);
+    }
     qkTensor = createOpAndInfer<tosa::MulOp>(
         builder, loc, cast<ShapedType>(scaleTensor.getType()).getElementType(),
         qkTensor, scaleTensor, /*shift=*/0);
@@ -2698,6 +2746,10 @@ static func::FuncOp createCpuAttentionKernelWithMlir(ModuleOp module,
 
   if (hasAttnBias) {
     auto biasTensor = getTensorForBlockArg(optionalArgsCounter++);
+    if (currentSeqLen != -1) {
+      biasTensor =
+          sliceKVCacheTosa(builder, loc, biasTensor, currentSeqLen, /*axis=*/2);
+    }
     qkTensor = createOpAndInfer<tosa::AddOp>(
         builder, loc, cast<ShapedType>(biasTensor.getType()).getElementType(),
         qkTensor, biasTensor);

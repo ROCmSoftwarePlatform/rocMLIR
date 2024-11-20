@@ -538,8 +538,9 @@ AttentionRewritePattern::matchAndRewrite(AttentionOp op,
     prePadG0NAttr = rw.getIndexAttr(gemm0Size.n);
   }
   auto newOp = rw.create<GridwiseAttentionAccelOp>(
-      loc, queries, keys, values, adaptor.getPreSoftmaxElemWiseInputs(), out,
-      op.getArchAttr(), op.getFeaturesAttr(), blockSizeAttr, gridSizeAttr,
+      loc, queries, keys, values, adaptor.getPreSoftmaxElemWiseInputs(),
+      op.getCurrentSeqLen(), out, op.getArchAttr(), op.getFeaturesAttr(),
+      blockSizeAttr, gridSizeAttr,
       /*disableQBypassLDS=*/nullptr, prePadG0MAttr, prePadG0NAttr, params0,
       params1, op.getFirstGemmIdxAttr());
   bool linalgOpFound = false;

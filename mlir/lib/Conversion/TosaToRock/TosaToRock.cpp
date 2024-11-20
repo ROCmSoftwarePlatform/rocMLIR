@@ -1089,9 +1089,11 @@ struct AttentionRewritePattern : public OpRewritePattern<tosa::MatMulOp> {
     tosa::MatMulOp firstMatMulOp = maybeFirstMatMul.value();
     IntegerAttr numCUAttr =
         numCu.has_value() ? rewriter.getI32IntegerAttr(numCu.value()) : nullptr;
+
+    // TODO: extract currentSeqLen from tosa
     rock::AttentionOp attnOp = rewriter.create<rock::AttentionOp>(
         loc, outputType, firstMatMulOp.getA(), firstMatMulOp.getB(), op.getB(),
-        elemwiseOtherArgs, output,
+        elemwiseOtherArgs, mlir::TypedValue<IndexType>{}, output,
         // TODO(implement transpose fusion support here)
         /*qTransposed=*/nullptr,
         /*kTransposed=*/nullptr,
