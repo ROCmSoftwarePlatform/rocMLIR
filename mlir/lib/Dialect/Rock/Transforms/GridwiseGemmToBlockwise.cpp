@@ -2004,7 +2004,7 @@ struct GridwiseAttentionAccelRewritePattern
       Value zero = rewriter.create<arith::ConstantIndexOp>(loc, 0);
       Value one = rewriter.create<arith::ConstantIndexOp>(loc, 1);
       gemm0MBlocksLastIter =
-          rewriter.create<arith::SubIOp>(loc, constGemm0MPerBlockM1, one);
+          rewriter.create<arith::SubIOp>(loc, gemm0MBlocksEarlyExit, one);
 
       mLoopOp =
           rewriter.create<scf::ForOp>(loc, zero, gemm0MBlocksEarlyExit, one);

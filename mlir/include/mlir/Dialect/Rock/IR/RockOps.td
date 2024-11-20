@@ -245,7 +245,7 @@ def Rock_AttentionOp :
   let assemblyFormat = [{
     `{` `\n`
         ` ` `qk` `=` (`tr` $qTransposed^)? $queries `*` (`tr` $kTransposed^)? $keys `:` type($queries) `,` type($keys) `\n`
-        (`(` $currentSeqLen^ `:` type($currentSeqLen) `)`)?
+        (`currentSeqLen` `=` `(` $currentSeqLen^ `:` type($currentSeqLen) `)` `\n`)?
         (`qk` `=` `elementwise` (`otherIns` `(` $preSoftmaxElemWiseInputs^ `:` type($preSoftmaxElemWiseInputs) `)`)? $preSoftmaxBody^ `\n`)?
         (`tr` $oTransposed^)? $out `=` `softmax` `(` `qk` `)` `*` (`tr` $vTransposed^)? $values `:` type($values) `->` type($out) `\n`
     `}` attr-dict (`->` type($result)^)?
@@ -680,7 +680,7 @@ def Rock_TransformingForOp :
     Results<(outs Variadic<AnyType>:$results)> {
   let summary = "for loop with coordinate transforms";
   let description = [{
-    Loops over several a rectangular regeon of dimensions `bounds` in several
+    Loops over several a rectangular region of dimensions `bounds` in several
     iteration domains, which are coordinate spaces that are the upper coordinates
     for a sequence of coordinate transformations.
 
@@ -782,7 +782,7 @@ def Rock_TransformingForOp :
       return *(getLowerStarts().getValues<uint32_t>().begin() + n);
     }
 
-    // Retreive the block arguments corresponding to the lower coordinates
+    // Retrieve the block arguments corresponding to the lower coordinates
     // for a given iteration domain.
     Block::BlockArgListType getLowerCoords(uint32_t domain) {
       uint32_t start = getLowerStart(domain);

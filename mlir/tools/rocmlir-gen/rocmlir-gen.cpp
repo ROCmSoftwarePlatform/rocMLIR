@@ -2310,7 +2310,7 @@ static Value sliceKVCacheTosa(OpBuilder builder, Location loc,
   assert(axis == 1 || axis == 2);
   assert(currentSeqLen > 0 && currentSeqLen <= inpShape[axis]);
 
-  if (currentSeqLen == inpShape[1])
+  if (currentSeqLen == inpShape[axis])
     return inputTensor;
 
   llvm::SmallVector<int64_t, 4> sliceStart = {0, 0, 0};
