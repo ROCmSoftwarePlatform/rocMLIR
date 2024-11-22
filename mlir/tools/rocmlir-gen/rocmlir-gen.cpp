@@ -518,11 +518,12 @@ static llvm::cl::opt<int64_t>
                llvm::cl::desc("number of heads of K,V in attention()"),
                llvm::cl::value_desc("positive integer"), llvm::cl::init(1));
 
-static llvm::cl::opt<int64_t>
+static llvm::cl::list<int64_t>
     currentSeqLen("current_seq_len",
-                  llvm::cl::desc("current sequence length of K and V (this is "
-                                 "related to KV-cache) in attention()"),
-                  llvm::cl::value_desc("positive integer"), llvm::cl::init(-1));
+                  llvm::cl::desc("List of sequence lengths of K and V (related "
+                                 "to KV-cache) in attention()"),
+                  llvm::cl::value_desc("list of positive integers"),
+                  llvm::cl::CommaSeparated);
 
 static llvm::cl::opt<int64_t> sequenceLengthQ(
     "seq_len_q", llvm::cl::desc("sequence length of Q in attention()"),
@@ -835,6 +836,7 @@ struct AttentionQuantizedArgIndex {
   static const size_t quantScale = 4;
   static const size_t scale = 5;
   static const size_t bias = 6;
+  static const size_t currentSeqLen = 7;
 };
 
 struct AttentionArgIndex {
@@ -843,6 +845,7 @@ struct AttentionArgIndex {
   static const size_t v = 2;
   static const size_t scale = 3;
   static const size_t bias = 4;
+  static const size_t currentSeqLen = 5;
 };
 
 struct GenParams {
@@ -2187,6 +2190,7 @@ static void getAttentionTypes(SmallVectorImpl<Type> &result,
   SmallVector<int64_t> oDims{groupSize * numHeadsQ, sequenceLengthQ, headDimV};
   SmallVector<int64_t> transposedODims{groupSize * numHeadsQ, headDimV,
                                        sequenceLengthQ};
+
   bool isQuantized =
       elemTypes[0] == IntegerType::get(elemTypes[0].getContext(), 8);
 
@@ -2200,6 +2204,8 @@ static void getAttentionTypes(SmallVectorImpl<Type> &result,
                                         : AttentionArgIndex::scale;
   const size_t biasIndex =
       isQuantized ? AttentionQuantizedArgIndex::bias : AttentionArgIndex::bias;
+  const size_t currentSeqLenIndex = 
+      isQuantized ? AttentionQuantizedArgIndex::currentSeqLen : AttentionArgIndex::currentSeqLen;
   const size_t outputIndex = biasIndex;
 
   MemRefType qType = MemRefType::get(transposeQ ? transposedQDims : qDims,
@@ -2225,14 +2231,22 @@ static void getAttentionTypes(SmallVectorImpl<Type> &result,
     result.push_back(qsType);
   }
   if (hasAttnScale) {
-    SmallVector<int64_t> scaleDims{groupSize * numHeadsQ, sequenceLengthQ, sequenceLengthK};
+    SmallVector<int64_t> scaleDims{groupSize * numHeadsQ, sequenceLengthQ,
+                                   sequenceLengthK};
     MemRefType sType = MemRefType::get(scaleDims, elemTypes[scaleIndex]);
     result.push_back(sType);
   }
   if (hasAttnBias) {
-    SmallVector<int64_t> biasDims{groupSize * numHeadsQ, sequenceLengthQ, sequenceLengthK};
+    SmallVector<int64_t> biasDims{groupSize * numHeadsQ, sequenceLengthQ,
+                                  sequenceLengthK};
     MemRefType bType = MemRefType::get(biasDims, elemTypes[biasIndex]);
     result.push_back(bType);
+  }
+  if (!currentSeqLen.empty()) {
+    SmallVector<int64_t> currentSeqDims{groupSize};
+    MemRefType currSeqLenType =
+        MemRefType::get(currentSeqDims, elemTypes[currentSeqLenIndex]);
+    result.push_back(currSeqLenType);
   }
   MemRefType outType = MemRefType::get(transposeO ? transposedODims : oDims,
                                        elemTypes[outputIndex]);
@@ -2266,7 +2280,8 @@ getAttentionDimNames(SmallVectorImpl<SmallVector<StringRef>> &result,
     result.emplace_back(SmallVector<StringRef>{gName, seqQName, seqKName});
   if (hasAttnBias)
     result.emplace_back(SmallVector<StringRef>{gName, seqQName, seqKName});
-
+  if (!currentSeqLen.empty())
+    result.emplace_back(SmallVector<StringRef>{gName});
   if (transposeO)
     result.emplace_back(SmallVector<StringRef>{gName, headVName, seqQName});
   else
@@ -2301,28 +2316,86 @@ Value addTensorArgToBlock(OpBuilder &builder, Location loc,
   return funcArgTensor;
 }
 
-static Value sliceKVCacheTosa(OpBuilder builder, Location loc,
-                              Value inputTensor, int64_t currentSeqLen,
-                              int64_t axis) {
+template <typename T>
+static Value maskKVCacheTosa(OpBuilder builder, Location loc, Value inputTensor,
+                             Value currentSeqLenVal, T initValue) {
+  // inputTensor is [B*NUM_HEADS, SEQ_LEN_Q, SEQ_LEN_KV], we want to reshape to
+  // [B, NUM_HEADS, SEQ_LEN_Q, SEQ_LEN_KV]
+  auto origType = cast<RankedTensorType>(inputTensor.getType());
+  ArrayRef<int64_t> origShape = origType.getShape();
+  SmallVector<int64_t, 4> newShape = {origShape[0] / numHeadsQ, numHeadsQ,
+                                      origShape[1], origShape[2]};
+  inputTensor = createOpAndInfer<tosa::ReshapeOp>(
+      builder, loc, origType.getElementType(), inputTensor, newShape);
+
   auto inpType = cast<RankedTensorType>(inputTensor.getType());
   ArrayRef<int64_t> inpShape = inpType.getShape();
+  assert(static_cast<int64_t>(currentSeqLen.size()) == inpShape[0] &&
+         "Number of current sequence lenght must match batch dimension");
+  for (auto v : currentSeqLen)
+    assert(v > 0 && v <= inpShape[3]);
 
-  assert(axis == 1 || axis == 2);
-  assert(currentSeqLen > 0 && currentSeqLen <= inpShape[axis]);
+  // create range 0 to inpShape[axis]
+  llvm::SmallVector<int32_t> range;
+  range.reserve(inpShape[3]);
+  for (int i = 0; i < inpShape[3]; i++)
+    range.push_back(i);
+  DenseElementsAttr rangeAttr = DenseIntElementsAttr::get(
+      RankedTensorType::get({inpShape[3]}, builder.getI32Type()), range);
+  Value rangeVal =
+      builder.create<tosa::ConstOp>(loc, rangeAttr.getType(), rangeAttr);
 
-  if (currentSeqLen == inpShape[axis])
-    return inputTensor;
+  // broadcast range to inputTensor shape
+  auto outType = RankedTensorType::get(inpShape, builder.getI32Type());
+  auto zeroValue = cast<ElementsAttr>(builder.getZeroAttr(outType));
+  auto zeroTensor = builder.create<tosa::ConstOp>(loc, outType, zeroValue);
+  auto rangeBroadcast = createOpAndInfer<tosa::AddOp>(
+      builder, loc, builder.getI32Type(), zeroTensor, rangeVal);
 
-  llvm::SmallVector<int64_t, 4> sliceStart = {0, 0, 0};
-  llvm::SmallVector<int64_t, 4> sliceSizeAxis1 = {inpShape[0], currentSeqLen,
-                                                  inpShape[2]};
-  llvm::SmallVector<int64_t, 4> sliceSizeAxis2 = {inpShape[0], inpShape[1],
-                                                  currentSeqLen};
-  auto sliceSize = (axis == 1) ? builder.getDenseI64ArrayAttr(sliceSizeAxis1)
-                               : builder.getDenseI64ArrayAttr(sliceSizeAxis2);
-  return createOpAndInfer<tosa::SliceOp>(
-      builder, loc, inpType.getElementType(), inputTensor,
-      builder.getDenseI64ArrayAttr(sliceStart), sliceSize);
+  // broadcast currentSeqLen
+  auto currentSeqLenBroadcast = createOpAndInfer<tosa::AddOp>(
+      builder, loc, builder.getI32Type(), zeroTensor, currentSeqLenVal);
+
+  // create mask
+  auto mask = createOpAndInfer<tosa::GreaterEqualOp>(
+      builder, loc, builder.getIntegerType(1), rangeBroadcast,
+      currentSeqLenBroadcast);
+
+  // create a tensor with a single value and broadcast it
+  DenseElementsAttr initValueAttr;
+  if constexpr (std::is_same_v<T, int32_t>) {
+    assert(inpType.getElementType() == builder.getI32Type());
+    initValueAttr = DenseIntElementsAttr::get(
+        RankedTensorType::get(inpShape, inpType.getElementType()), initValue);
+  } else if constexpr (std::is_same_v<T, float>) {
+    assert(inpType.getElementType() == builder.getF32Type() ||
+           inpType.getElementType() == builder.getF16Type());
+    llvm::APFloat fpVal(initValue);
+    if (inpType.getElementType() == builder.getF16Type()) {
+      bool losesInfo = false;
+      auto status =
+          fpVal.convert(llvm::APFloat::IEEEhalf(),
+                        llvm::APFloat::rmNearestTiesToEven, &losesInfo);
+      assert(status == llvm::APFloat::opOK);
+    }
+    initValueAttr = DenseFPElementsAttr::get(
+        RankedTensorType::get(inpShape, inpType.getElementType()), fpVal);
+  } else {
+    static_assert(!std::is_same_v<T, T>,
+                  "Unsupported type for MLIR type mapping");
+  }
+  Value initVal = builder.create<tosa::ConstOp>(loc, initValueAttr.getType(),
+                                                initValueAttr);
+
+  // mask is 1 for values we want to set to -inf, initVal=-inf
+  auto result = createOpAndInfer<tosa::SelectOp>(
+      builder, loc, inpType.getElementType(), mask, initVal, inputTensor);
+
+  // reshape result back to [B*NUM_HEADS, SEQ_LEN_Q, SEQ_LEN_KV]
+  auto resultReshaped = createOpAndInfer<tosa::ReshapeOp>(
+      builder, loc, inpType.getElementType(), result, origShape);
+
+  return resultReshaped;
 }
 
 static Value broadcastGQATosa(OpBuilder builder, Location loc,
@@ -2360,6 +2433,33 @@ static Value broadcastGQATosa(OpBuilder builder, Location loc,
                                                  reassocIndices);
 }
 
+static Value broadcastKVCacheRock(OpBuilder builder, Location loc,
+                                  Value inputTensor) {
+  ArrayRef<int64_t> inpShape =
+      cast<ShapedType>(inputTensor.getType()).getShape();
+  assert(static_cast<int64_t>(currentSeqLen.size()) == inpShape[0] &&
+         "Number of current sequence lenght must match batch dimension");
+  SmallVector<StringRef> startNames = {"gemmG"};
+  rock::BottomUpTMBuilder addDim(builder, startNames, inpShape);
+  addDim.addDim("seqLen", 1, 1);
+  addDim.passThrough(ArrayRef<uint32_t>{0}, ArrayRef<uint32_t>{0});
+  auto addDimAttr = addDim.get();
+  Value matrixAddDim =
+      builder.create<rock::TransformOp>(loc, inputTensor, addDimAttr);
+
+  auto broadcaster = rock::BottomUpTMBuilder::above(addDim, addDimAttr);
+  broadcaster.broadcast({1}, {numHeadsQ});
+  broadcaster.passThrough(ArrayRef<uint32_t>{0}, ArrayRef<uint32_t>{0});
+  auto broadcasterAttr = broadcaster.get();
+  Value tensorBroadcast =
+      builder.create<rock::TransformOp>(loc, matrixAddDim, broadcasterAttr);
+
+  auto merger = rock::BottomUpTMBuilder::above(broadcaster, broadcasterAttr);
+  merger.merge("gemmG", 0, {"gemmG", "seqLen"});
+  auto mergerAttr = merger.get();
+  return builder.create<rock::TransformOp>(loc, tensorBroadcast, mergerAttr);
+}
+
 static Value broadcastGQARock(OpBuilder builder, Location loc,
                               Value inputTensor) {
   assert(numHeadsQ % numHeadsKV == 0);
@@ -2389,9 +2489,7 @@ static Value broadcastGQARock(OpBuilder builder, Location loc,
   merger.merge("gemmG", 0, {"gemmG", "broadcastDim"});
   merger.passThrough({1, 2}, {2, 3});
   auto mergerAttr = merger.get();
-  auto tmp =
-      builder.create<rock::TransformOp>(loc, tensorBroadcast, mergerAttr);
-  return tmp;
+  return builder.create<rock::TransformOp>(loc, tensorBroadcast, mergerAttr);
 }
 
 static func::FuncOp createGpuAttentionKernel(ModuleOp module,
@@ -2441,6 +2539,7 @@ static func::FuncOp createGpuAttentionKernel(ModuleOp module,
   Value scale;
   Value bias;
   Value output;
+  Value currentSeqLenTensor;
 
   SmallVector<Value> elemwiseInputs;
   unsigned optionalArgsCounter = 3;
@@ -2458,24 +2557,22 @@ static func::FuncOp createGpuAttentionKernel(ModuleOp module,
     bias = unflattenedArgs[optionalArgsCounter++];
     elemwiseInputs.push_back(bias);
   }
+  if (!currentSeqLen.empty()) {
+    currentSeqLenTensor = broadcastKVCacheRock(
+        builder, loc, unflattenedArgs[optionalArgsCounter++]);
+  }
   output = unflattenedArgs[optionalArgsCounter];
 
   keys = broadcastGQARock(builder, loc, keys);
   values = broadcastGQARock(builder, loc, values);
 
-  // init current_seq_len (KV Cache)
-  Value currSeqLen = mlir::TypedValue<IndexType>{};
-  if (currentSeqLen != -1) {
-    currSeqLen = builder.create<arith::ConstantIndexOp>(loc, currentSeqLen);
-  }
-
   IntegerAttr numCUAttr =
       (num_cu.getNumOccurrences() > 0 ? builder.getI32IntegerAttr(num_cu)
                                       : nullptr);
   auto attention = builder.create<rock::AttentionOp>(
-      loc, TypeRange{}, queries, keys, values, elemwiseInputs, currSeqLen,
-      output, transposeQ, transposeK, transposeV, transposeO, archAttr,
-      params.features, numCUAttr,
+      loc, TypeRange{}, queries, keys, values, elemwiseInputs,
+      currentSeqLenTensor, output, transposeQ, transposeK, transposeV,
+      transposeO, archAttr, params.features, numCUAttr,
       /*params0=*/nullptr, /*params1=*/nullptr, /*firstGemmIdx=*/0);
   {
     Block *preSoftmaxElemwiseBlock =
@@ -2704,20 +2801,38 @@ static func::FuncOp createCpuAttentionKernelWithMlir(ModuleOp module,
   keysTensor = broadcastGQATosa(builder, loc, keysTensor);
   valuesTensor = broadcastGQATosa(builder, loc, valuesTensor);
 
-  // slice K and V (KV Cache)
-  if (currentSeqLen != -1) {
-    keysTensor =
-        sliceKVCacheTosa(builder, loc, keysTensor, currentSeqLen, /*axis=*/2);
-    valuesTensor =
-        sliceKVCacheTosa(builder, loc, valuesTensor, currentSeqLen, /*axis=*/1);
-  }
-
   Type firstGemmOutElemType = params.types[0];
   if (isQuantized) {
     firstGemmOutElemType = IntegerType::get(ctx, 32);
   }
   Value qkTensor = createOpAndInfer<tosa::MatMulOp>(
       builder, loc, firstGemmOutElemType, queriesTensor, keysTensor);
+
+  // mask out qkTensor
+  Value currentSeqLenTensor;
+  if (!currentSeqLen.empty()) {
+    unsigned seqLenCounter = 3;
+    if (isQuantized)
+      seqLenCounter += 2;
+    if (hasAttnScale)
+      seqLenCounter++;
+    if (hasAttnBias)
+      seqLenCounter++;
+    auto currentSeqLenTensorRaw = getTensorForBlockArg(seqLenCounter);
+    auto type = cast<RankedTensorType>(currentSeqLenTensorRaw.getType());
+    ArrayRef<int64_t> shape = type.getShape();
+    assert(shape.size() == 1);
+
+    currentSeqLenTensor = createOpAndInfer<tosa::ReshapeOp>(
+        builder, loc, type.getElementType(), currentSeqLenTensorRaw,
+        builder.getDenseI64ArrayAttr({shape[0], 1, 1, 1}));
+    if (isQuantized)
+      qkTensor = maskKVCacheTosa(builder, loc, qkTensor, currentSeqLenTensor,
+                                 std::numeric_limits<int32_t>::min());
+    else
+      qkTensor = maskKVCacheTosa(builder, loc, qkTensor, currentSeqLenTensor,
+                                 -std::numeric_limits<float>::infinity());
+  }
 
   unsigned optionalArgsCounter = 3;
   if (isQuantized) {
@@ -2735,10 +2850,10 @@ static func::FuncOp createCpuAttentionKernelWithMlir(ModuleOp module,
   }
   if (hasAttnScale) {
     auto scaleTensor = getTensorForBlockArg(optionalArgsCounter++);
-    if (currentSeqLen != -1) {
-      scaleTensor = sliceKVCacheTosa(builder, loc, scaleTensor, currentSeqLen,
-                                     /*axis=*/2);
-    }
+    if (!currentSeqLen.empty())
+      scaleTensor =
+          maskKVCacheTosa(builder, loc, scaleTensor, currentSeqLenTensor, 1.0f);
+
     qkTensor = createOpAndInfer<tosa::MulOp>(
         builder, loc, cast<ShapedType>(scaleTensor.getType()).getElementType(),
         qkTensor, scaleTensor, /*shift=*/0);
@@ -2746,10 +2861,10 @@ static func::FuncOp createCpuAttentionKernelWithMlir(ModuleOp module,
 
   if (hasAttnBias) {
     auto biasTensor = getTensorForBlockArg(optionalArgsCounter++);
-    if (currentSeqLen != -1) {
+    if (!currentSeqLen.empty())
       biasTensor =
-          sliceKVCacheTosa(builder, loc, biasTensor, currentSeqLen, /*axis=*/2);
-    }
+          maskKVCacheTosa(builder, loc, biasTensor, currentSeqLenTensor, 0.0f);
+
     qkTensor = createOpAndInfer<tosa::AddOp>(
         builder, loc, cast<ShapedType>(biasTensor.getType()).getElementType(),
         qkTensor, biasTensor);
@@ -3184,7 +3299,6 @@ static void insertValidationCalls(const GenParams &genParams, OpBuilder &b,
       }
       // generate all sub-kernels, and get corresponding gemmId
       std::string kernelBaseName = genConfig.kernelBaseName;
-      llvm::errs() << kernelBaseName << "\n";
       for (int i = kernelStart; i < kernelCount; ++i) {
         convGenerator.setKernelName(kernelBaseName + "_" + std::to_string(i));
         if (failed(convGenerator.genConvModule(module, i, true,
@@ -3293,6 +3407,7 @@ static void insertValidationCalls(const GenParams &genParams, OpBuilder &b,
         root0.func.getName().str() + "_verify" + std::to_string(outIdx);
     auto verifierFunc =
         createVerifierFunc(module, root0, testType, valType, funcName);
+
     b.create<func::CallOp>(loc, verifierFunc,
                            ValueRange{testResult, valResult});
   }
@@ -3344,6 +3459,7 @@ static LogicalResult populateHostHarnessLogic(
     b.create<func::CallOp>(loc, seedFunc, seedConst);
   }
 
+  bool isAttention = false;
   SmallVector<int32_t, 2> outIndices;
   if (genParams.operation.has_value()) {
     switch (genParams.operation.value()) {
@@ -3358,6 +3474,7 @@ static LogicalResult populateHostHarnessLogic(
       outIndices.push_back(0);
       break;
     case rock::KernelType::Attention:
+      isAttention = true;
       int32_t optionalArgsCounter{3};
       bool isQuantized = genParams.types[0] == b.getI8Type();
       if (isQuantized)
@@ -3365,6 +3482,8 @@ static LogicalResult populateHostHarnessLogic(
       if (hasAttnScale)
         ++optionalArgsCounter;
       if (hasAttnBias)
+        ++optionalArgsCounter;
+      if (!currentSeqLen.empty())
         ++optionalArgsCounter;
       outIndices.push_back(optionalArgsCounter);
     }
@@ -3391,7 +3510,18 @@ static LogicalResult populateHostHarnessLogic(
     }
     auto lvar = b.create<memref::AllocOp>(loc, paramMRType);
     localVars.push_back(lvar);
-    if (!isRandom) {
+
+    if (!currentSeqLen.empty() && isAttention &&
+        idx == root0.params.size() - 2) {
+      // fill with currentSeqLen
+      // as it's very small, just define constant and store directly
+      for (auto pair : llvm::enumerate(currentSeqLen)) {
+        Value index = b.create<arith::ConstantIndexOp>(loc, pair.index());
+        Value value =
+            b.create<arith::ConstantIntOp>(loc, pair.value(), b.getI32Type());
+        b.create<memref::StoreOp>(loc, value, lvar, ValueRange{index});
+      }
+    } else if (!isRandom) {
       SmallVector<float, 3> initPattern = getTensorInitPattern(elemType);
       if (failed(populateTensorFillLogic(b, loc, initPattern, elemType, lvar)))
         return failure();
@@ -3681,7 +3811,7 @@ static void generateKernel(MLIRContext *context, GenParams &genParams,
       // We only support first-gemm i8 version of attention
       // This will be changed when we support both gemms of i8.
       if (elemType == IntegerType::get(context, 8)) {
-        constexpr size_t maxNumArgs{7};
+        constexpr size_t maxNumArgs{8};
         genParams.types.resize(maxNumArgs);
         genParams.types[AttentionQuantizedArgIndex::q] =
             IntegerType::get(context, 8);
@@ -3697,6 +3827,8 @@ static void generateKernel(MLIRContext *context, GenParams &genParams,
             Float16Type::get(context);
         genParams.types[AttentionQuantizedArgIndex::bias] =
             Float16Type::get(context);
+        genParams.types[AttentionQuantizedArgIndex::currentSeqLen] =
+            IntegerType::get(context, 32);
       } else {
         constexpr size_t maxNumArgs{5};
         // Note: In the current implementation, all operands have the same type.
@@ -3704,6 +3836,8 @@ static void generateKernel(MLIRContext *context, GenParams &genParams,
         for (size_t argIdx{0}; argIdx < maxNumArgs; ++argIdx) {
           genParams.types.push_back(elemType);
         }
+        // extra operand: currentSeqLen
+        genParams.types.push_back(IntegerType::get(context, 32));
       }
       genParams.convConfig = std::nullopt;
       (void)createGpuAttentionKernel(module, genParams);

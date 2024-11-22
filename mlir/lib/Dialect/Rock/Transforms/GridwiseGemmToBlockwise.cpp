@@ -1380,12 +1380,11 @@ struct GridwiseAttentionAccelRewritePattern
     }
   }
 
-  void setGemm0OutputOutofscopeKVCache(
+  void setGemm0OutputOutOfScopeKVCache(
       PatternRewriter &rewriter, Location loc,
       layout::GridCoordinates gridCoords, Value gemm0OutBuffer,
-      RegsAsMatrixSubTiles gemm0OutSubTileViews,
-      TypedValue<IndexType> currentSeqLen, Value mLoopIV,
-      Value gemm0MBlocksLastIter) const {
+      RegsAsMatrixSubTiles gemm0OutSubTileViews, Value currentSeqLen,
+      Value mLoopIV, Value gemm0MBlocksLastIter) const {
     if (currentSeqLen) {
       auto isLastIteration = rewriter.create<arith::CmpIOp>(
           loc, arith::CmpIPredicate::eq, mLoopIV, gemm0MBlocksLastIter);
@@ -1685,7 +1684,7 @@ struct GridwiseAttentionAccelRewritePattern
     ArrayRef<int64_t> outShape = cast<MemRefType>(trOut.getType()).getShape();
     Type elemTypeOut = cast<MemRefType>(trOut.getType()).getElementType();
 
-    TypedValue<IndexType> currentSeqLen = op.getCurrentSeqLen();
+    TypedValue<MemRefType> currentSeqLenTensor = op.getCurrentSeqLen();
 
     // Gemm0 out is casted to be elemTypeV
     Type elemTypeQxK = elemTypeV;
@@ -1984,27 +1983,68 @@ struct GridwiseAttentionAccelRewritePattern
     }
 
     bool isReverseGrid = succeeded(rock::getReverseGrid(op));
-    if (isReverseGrid && currentSeqLen) {
+    if (isReverseGrid && currentSeqLenTensor) {
       return op.emitError(
           "reverse grid is not compatible with currentSeqLen\n");
     }
 
     LoopLikeOpInterface mLoopOp;
     Value gemm0MBlocksLastIter;
+    Value currentSeqLen;
     // This is needed for KV Cache support
-    if (currentSeqLen) {
+    if (currentSeqLenTensor) {
+      Value zero = rewriter.createOrFold<arith::ConstantIndexOp>(loc, 0);
+      auto gridCoordsGemm0LoadCurrSeqLen = layout::makeGxNGridLayout(
+          rewriter, loc, bid, zero, gemm0NBlocks, gridSize, arch);
+
+      // add dim 1 for thread_read_into (registers)
+      ArrayRef<int64_t> inpShape =
+          cast<ShapedType>(currentSeqLenTensor.getType()).getShape();
+      SmallVector<StringRef> startNames = {"gemmG"};
+      rock::BottomUpTMBuilder addDim(rewriter, startNames, inpShape);
+      addDim.addDim("dummy", 1, 1);
+      addDim.passThrough(ArrayRef<uint32_t>{0}, ArrayRef<uint32_t>{0});
+      auto addDimAttr = addDim.get();
+      Value currentSeqLenTensorAddDim = rewriter.create<rock::TransformOp>(
+          loc, currentSeqLenTensor, addDimAttr);
+      Type currentSeqLenElemType =
+          getElementTypeOrSelf(currentSeqLenTensorAddDim.getType());
+
+      // create registers
+      auto privateMemoryAddressSpace = rewriter.getAttr<gpu::AddressSpaceAttr>(
+          gpu::GPUDialect::getPrivateAddressSpace());
+      auto memrefType = MemRefType::get({1}, currentSeqLenElemType, AffineMap{},
+                                        privateMemoryAddressSpace);
+      auto currentSeqLenLoad = rewriter.create<GpuAllocOp>(loc, memrefType);
+
+      // load from memory to registers
+      rewriter.create<ThreadwiseReadIntoOp>(
+          loc, vectorOfBoolShapedLike(currentSeqLenLoad),
+          currentSeqLenTensorAddDim, currentSeqLenLoad,
+          /*dynamicValidities=*/ValueRange{},
+          /*extraViews=*/rewriter.getArrayAttr({}),
+          /*extraIndices=*/
+          ValueRange{gridCoordsGemm0LoadCurrSeqLen.g_block}, true, true);
+
+      // load from registers
+      Value currentSeqLenValue = rewriter.create<InBoundsLoadOp>(
+          loc, currentSeqLenElemType, currentSeqLenLoad, ValueRange{zero});
+
+      currentSeqLen = rewriter.createOrFold<arith::IndexCastOp>(
+          loc, rewriter.getIndexType(), currentSeqLenValue);
+
       Value constGemm0MPerBlock =
-          rewriter.create<arith::ConstantIndexOp>(loc, gemm0MPerBlock);
+          rewriter.createOrFold<arith::ConstantIndexOp>(loc, gemm0MPerBlock);
       Value constGemm0MPerBlockM1 =
-          rewriter.create<arith::ConstantIndexOp>(loc, gemm0MPerBlock - 1);
+          rewriter.createOrFold<arith::ConstantIndexOp>(loc,
+                                                        gemm0MPerBlock - 1);
       Value numerator = rewriter.create<arith::AddIOp>(loc, currentSeqLen,
                                                        constGemm0MPerBlockM1);
-      Value gemm0MBlocksEarlyExit =
-          rewriter.create<arith::DivUIOp>(loc, numerator, constGemm0MPerBlock);
-      Value zero = rewriter.create<arith::ConstantIndexOp>(loc, 0);
-      Value one = rewriter.create<arith::ConstantIndexOp>(loc, 1);
+      Value gemm0MBlocksEarlyExit = rewriter.createOrFold<arith::DivUIOp>(
+          loc, numerator, constGemm0MPerBlock);
+      Value one = rewriter.createOrFold<arith::ConstantIndexOp>(loc, 1);
       gemm0MBlocksLastIter =
-          rewriter.create<arith::SubIOp>(loc, gemm0MBlocksEarlyExit, one);
+          rewriter.createOrFold<arith::SubIOp>(loc, gemm0MBlocksEarlyExit, one);
 
       mLoopOp =
           rewriter.create<scf::ForOp>(loc, zero, gemm0MBlocksEarlyExit, one);
@@ -2188,7 +2228,7 @@ struct GridwiseAttentionAccelRewritePattern
                                      gemm0OutSubTileViewsTrUnPadded, isGfx11);
       }
       // Negative Infinite for extra values (KV cache)
-      setGemm0OutputOutofscopeKVCache(
+      setGemm0OutputOutOfScopeKVCache(
           rewriter, loc, gridCoordsGemm0, gemm0OutBuffer,
           gemm0OutSubTileViewsTr, currentSeqLen, mLoopIV, gemm0MBlocksLastIter);
 #endif

@@ -2121,6 +2121,18 @@ LogicalResult AttentionOp::verify() {
     return emitError("Head dimensions do not match (V and Output)");
   }
 
+  // check currentSeqLen (KV Cache)
+  auto currentSeqLen = getCurrentSeqLen();
+  if (currentSeqLen) {
+    ShapedType seqLenType = currentSeqLen.getType();
+    if (seqLenType.getShape().size() != 1) {
+      return emitError("Number of dimensions is not one (currentSeqLen)");
+    }
+    if (seqLenType.getShape()[0] != oBatchDim) {
+      return emitError(
+          "Batch dimensions do not match (currentSeqLen and Output)");
+    }
+  }
   return success();
 }
 
