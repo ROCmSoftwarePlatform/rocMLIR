@@ -2212,8 +2212,9 @@ struct GridwiseAttentionAccelRewritePattern
       // Scale gemm0 output by (1/ln2)
       // So that we can use exp2 instead of exp.
 #ifndef ROCK_DEBUG_ATTENTION_REMOVE_SOFTMAX
-      Value ln2Recip = createConstantFloatOp(rewriter, loc, elemTypeQxK,
-                                             elemTypeQxK, 1.44269504);
+      Value ln2Recip = createConstantFloatOp(
+          rewriter, loc, elemTypeQxK, elemTypeQxK, 1.44269504f,
+          elemTypeQxK.isF32() ? APFloat::opOK : APFloat::opInexact);
       postProcessFirstGemmSplat<ElementwiseMultOp>(
           rewriter, loc, gridCoordsGemm0, gemm0OutBuffer, gemm0OutSubTileViews,
           ln2Recip.getDefiningOp<arith::ConstantOp>().getValue());

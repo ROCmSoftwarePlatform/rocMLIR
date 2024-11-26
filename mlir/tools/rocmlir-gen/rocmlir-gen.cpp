@@ -2808,7 +2808,7 @@ static func::FuncOp createCpuAttentionKernelWithMlir(ModuleOp module,
   Value qkTensor = createOpAndInfer<tosa::MatMulOp>(
       builder, loc, firstGemmOutElemType, queriesTensor, keysTensor);
 
-  // mask out qkTensor
+  // get currentSeqLenTensor
   Value currentSeqLenTensor;
   if (!currentSeqLen.empty()) {
     unsigned seqLenCounter = 3;
@@ -2826,12 +2826,6 @@ static func::FuncOp createCpuAttentionKernelWithMlir(ModuleOp module,
     currentSeqLenTensor = createOpAndInfer<tosa::ReshapeOp>(
         builder, loc, type.getElementType(), currentSeqLenTensorRaw,
         builder.getDenseI64ArrayAttr({shape[0], 1, 1, 1}));
-    if (isQuantized)
-      qkTensor = maskKVCacheTosa(builder, loc, qkTensor, currentSeqLenTensor,
-                                 std::numeric_limits<int32_t>::min());
-    else
-      qkTensor = maskKVCacheTosa(builder, loc, qkTensor, currentSeqLenTensor,
-                                 -std::numeric_limits<float>::infinity());
   }
 
   unsigned optionalArgsCounter = 3;
@@ -2868,6 +2862,11 @@ static func::FuncOp createCpuAttentionKernelWithMlir(ModuleOp module,
     qkTensor = createOpAndInfer<tosa::AddOp>(
         builder, loc, cast<ShapedType>(biasTensor.getType()).getElementType(),
         qkTensor, biasTensor);
+  }
+
+  if (currentSeqLenTensor) {
+    qkTensor = maskKVCacheTosa(builder, loc, qkTensor, currentSeqLenTensor,
+                               -std::numeric_limits<float>::infinity());
   }
 
   constexpr int64_t reductionAxis = 2;

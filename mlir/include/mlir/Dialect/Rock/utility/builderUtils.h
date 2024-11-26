@@ -11,7 +11,8 @@ namespace mlir {
 namespace rock {
 /// Utility op to emit constant float op
 Value createConstantFloatOp(OpBuilder &b, Location loc, Type type,
-                            Type elemType, float value);
+                            Type elemType, float value,
+                            APFloat::opStatus expectedStatus = APFloat::opOK);
 
 /// Utility op to emit constant int op
 Value createConstantIntOp(OpBuilder &b, Location loc, Type type, Type elemType,

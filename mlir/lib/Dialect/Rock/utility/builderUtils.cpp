@@ -40,21 +40,22 @@ Value createConstantIntOp(OpBuilder &b, Location loc, Type type,
 }
 
 Value createConstantFloatOp(OpBuilder &b, Location loc, Type type,
-                            Type elementType, float value) {
+                            Type elemType, float value,
+                            APFloat::opStatus expectedStatus) {
   auto semantics = static_cast<APFloat::Semantics>(-1);
-  if (elementType.isF32()) {
+  if (elemType.isF32()) {
     semantics = APFloat::S_IEEEsingle;
-  } else if (elementType.isF16()) {
+  } else if (elemType.isF16()) {
     semantics = APFloat::S_IEEEhalf;
-  } else if (elementType.isBF16()) {
+  } else if (elemType.isBF16()) {
     semantics = APFloat::S_BFloat;
-  } else if (elementType.isFloat8E4M3FNUZ()) {
+  } else if (elemType.isFloat8E4M3FNUZ()) {
     semantics = APFloat::S_Float8E4M3FNUZ;
-  } else if (elementType.isFloat8E5M2FNUZ()) {
+  } else if (elemType.isFloat8E5M2FNUZ()) {
     semantics = APFloat::S_Float8E5M2FNUZ;
-  } else if (elementType.isFloat8E4M3FN()) {
+  } else if (elemType.isFloat8E4M3FN()) {
     semantics = APFloat::S_Float8E4M3FN;
-  } else if (elementType.isFloat8E5M2()) {
+  } else if (elemType.isFloat8E5M2()) {
     semantics = APFloat::S_Float8E5M2;
   } else {
     llvm_unreachable("Unexpected float semantics");
@@ -62,17 +63,19 @@ Value createConstantFloatOp(OpBuilder &b, Location loc, Type type,
 
   APFloat apValue(value);
   bool lostInfo = false;
-  apValue.convert(APFloat::EnumToSemantics(semantics),
-                  APFloat::rmNearestTiesToEven, &lostInfo);
+  auto status = apValue.convert(APFloat::EnumToSemantics(semantics),
+                                APFloat::rmNearestTiesToEven, &lostInfo);
+
+  assert(status == expectedStatus);
   Value retValue;
 
   if (auto shapedType = dyn_cast<ShapedType>(type)) {
-    Attribute constValue = b.getFloatAttr(elementType, apValue);
+    Attribute constValue = b.getFloatAttr(elemType, apValue);
+    assert(shapedType.getElementType() == elemType);
     retValue = b.create<ConstantOp>(
         loc, SplatElementsAttr::get(shapedType, constValue));
   } else {
-    retValue =
-        b.create<ConstantOp>(loc, type, b.getFloatAttr(elementType, value));
+    retValue = b.create<ConstantOp>(loc, type, b.getFloatAttr(elemType, value));
   }
 
   return retValue;
