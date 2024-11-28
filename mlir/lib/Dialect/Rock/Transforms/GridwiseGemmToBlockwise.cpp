@@ -1043,7 +1043,7 @@ struct GridwiseAttentionAccelRewritePattern
                             gemm0OutExpTrs, gemm0OutTrs},
         /*bounds=*/ArrayRef<int64_t>{g0Mpt, g0Npt},
         /*strides=*/ArrayRef<int64_t>{1, 1},
-        /*useIndexDiffs=*/true, /*forceUnroll=*/true);
+        /*forceUnroll=*/true, /*useIndexDiffs=*/true);
     {
       OpBuilder::InsertionGuard guard(rewriter);
       rewriter.setInsertionPointToStart(loop.getBody());
@@ -1105,7 +1105,7 @@ struct GridwiseAttentionAccelRewritePattern
                             gemm0OutBufferMaxTrs},
         /*bounds=*/ArrayRef<int64_t>{g0Mpt, 1},
         /*strides=*/ArrayRef<int64_t>{1, 1},
-        /*useIndexDiffs=*/true, /*forceUnroll=*/true);
+        /*forceUnroll=*/true, /*useIndexDiffs=*/true);
     {
       OpBuilder::InsertionGuard guard(rewriter);
       rewriter.setInsertionPointToStart(loop.getBody());
@@ -1167,7 +1167,7 @@ struct GridwiseAttentionAccelRewritePattern
         ArrayRef<Attribute>{rewriter.getArrayAttr({}), attentionOutAccTrs},
         /*bounds=*/ArrayRef<int64_t>{g1Mpt, g1Npt},
         /*strides=*/ArrayRef<int64_t>{1, 1},
-        /*useIndexDiffs=*/true, /*forceUnroll=*/true);
+        /*forceUnroll=*/true, /*useIndexDiffs=*/true);
     {
       OpBuilder::InsertionGuard guard(rewriter);
       rewriter.setInsertionPointToStart(loop.getBody());
@@ -1230,7 +1230,7 @@ struct GridwiseAttentionAccelRewritePattern
                             attentionOutAccBufferTrs},
         /*bounds=*/ArrayRef<int64_t>{g1Mpt, g1Npt},
         /*strides=*/ArrayRef<int64_t>{1, 1},
-        /*useIndexDiffs=*/true, /*forceUnroll=*/true);
+        /*forceUnroll=*/true, /*useIndexDiffs=*/true);
     {
       OpBuilder::InsertionGuard guard(rewriter);
       rewriter.setInsertionPointToStart(loop.getBody());
@@ -1333,10 +1333,11 @@ struct GridwiseAttentionAccelRewritePattern
   // post normalization. Therefore, this function creates a trasnforming
   // for loop that overwrites out of bounds values of first gemm output
   // to be negative infinity.
-  void createFirstGemmNegInfPadding(
-      PatternRewriter &rewriter, Location loc,
-      layout::GridCoordinates gridCoords, Value gemm0OutBuffer,
-      RegsAsMatrixSubTiles gemm0OutSubTileViews) const {
+  void createFirstGemmNegInfPadding(PatternRewriter &rewriter, Location loc,
+                                    layout::GridCoordinates gridCoords,
+                                    Value gemm0OutBuffer,
+                                    RegsAsMatrixSubTiles gemm0OutSubTileViews,
+                                    bool isGfx11) const {
     MemRefType gemm0OutBufferType = cast<MemRefType>(gemm0OutBuffer.getType());
     auto negInfTyped = createConstantFloatOp(
         rewriter, loc, gemm0OutBufferType.getElementType(),
@@ -1346,6 +1347,9 @@ struct GridwiseAttentionAccelRewritePattern
     auto tid = rewriter.create<WorkitemIdOp>(loc, rewriter.getIndexType());
     int64_t elementsInThreadBuffer = gemm0OutBufferType.getNumElements();
     Value zero = rewriter.createOrFold<ConstantIndexOp>(loc, 0);
+
+    // TODO: fix forceUnroll=false for gfx1100
+    // (https://github.com/ROCm/rocMLIR-internal/issues/1661)
     auto loop = rewriter.create<TransformingForOp>(
         loc,
         ArrayRef<ValueRange>{{gridCoords.g_block, gridCoords.m_block,
@@ -1355,7 +1359,7 @@ struct GridwiseAttentionAccelRewritePattern
                             rewriter.getArrayAttr({})},
         /*bounds=*/ArrayRef<int64_t>{1, 1, 1, 1, elementsInThreadBuffer},
         /*strides=*/ArrayRef<int64_t>{1, 1, 1, 1, 1},
-        /*useIndexDiffs=*/true, /*forceUnroll=*/true);
+        /*forceUnroll=*/!isGfx11, /*useIndexDiffs=*/true);
     {
       OpBuilder::InsertionGuard guard(rewriter);
       rewriter.setInsertionPointToStart(loop.getBody());
@@ -2090,16 +2094,17 @@ struct GridwiseAttentionAccelRewritePattern
       postProcessFirstGemmSplat<ElementwiseMultOp>(
           rewriter, loc, gridCoordsGemm0, gemm0OutBuffer, gemm0OutSubTileViews,
           ln2Recip.getDefiningOp<arith::ConstantOp>().getValue());
-#endif
 
       // Handle padding
       bool hasPadding =
           op.getPrePadG0M().has_value() || op.getPrePadG0N().has_value();
       if (hasPadding) {
+        bool isGfx11 = arch.contains("gfx11");
         createFirstGemmNegInfPadding(rewriter, loc, gridCoordsGemm0,
                                      gemm0OutBuffer,
-                                     gemm0OutSubTileViewsTrUnPadded);
+                                     gemm0OutSubTileViewsTrUnPadded, isGfx11);
       }
+#endif
 
       APInt reductionAxis = APInt(64, 1);
       APInt nrDimPerThread = APInt(64, gemm0MPerBlock / gemm0MPerThread);
