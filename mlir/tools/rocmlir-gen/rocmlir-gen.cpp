@@ -2204,8 +2204,9 @@ static void getAttentionTypes(SmallVectorImpl<Type> &result,
                                         : AttentionArgIndex::scale;
   const size_t biasIndex =
       isQuantized ? AttentionQuantizedArgIndex::bias : AttentionArgIndex::bias;
-  const size_t currentSeqLenIndex = 
-      isQuantized ? AttentionQuantizedArgIndex::currentSeqLen : AttentionArgIndex::currentSeqLen;
+  const size_t currentSeqLenIndex =
+      isQuantized ? AttentionQuantizedArgIndex::currentSeqLen
+                  : AttentionArgIndex::currentSeqLen;
   const size_t outputIndex = biasIndex;
 
   MemRefType qType = MemRefType::get(transposeQ ? transposedQDims : qDims,
