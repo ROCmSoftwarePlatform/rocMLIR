@@ -330,7 +330,7 @@ func.func @gridwise_attn_kvcache(%arg0: memref<1x384x64xf32>, %arg1: memref<1x64
   // CHECK: %[[comparison:.+]] = arith.cmpi eq, %[[iterIndex]], %[[lastIter]] : index
   // CHECK-NEXT: scf.if %[[comparison]] {
   // CHECK: rock.transforming_for {forceUnroll, useIndexDiffs} (%[[dim0:.+]], %[[dim1:.+]], %[[dim2:.+]]) = [{{.*}}]({{.*}}), ({{.*}}) = []
-  // CHECK-NEXT: %[[secondComparison:.+]] = arith.cmpi sge, %[[dim2]], %[[currSeqLenIndex]] : index
+  // CHECK-NEXT: %[[secondComparison:.+]] = arith.cmpi uge, %[[dim2]], %[[currSeqLenIndex]] : index
   // CHECK-NEXT: scf.if %[[secondComparison]] {
   // CHECK-NEXT: rock.in_bounds_store
   rock.gridwise_attention_accel(%0, %arg1, %arg2, %arg4, %arg3) features =  mfma|dot|atomic_add preSoftmaxOps = {} {

@@ -1412,7 +1412,7 @@ struct GridwiseAttentionAccelRewritePattern
                                 thenb.getArrayAttr({})},
             /*bounds=*/ArrayRef<int64_t>{1, 1, 1, 1, elementsInThreadBuffer},
             /*strides=*/ArrayRef<int64_t>{1, 1, 1, 1, 1},
-            /*useIndexDiffs=*/true, /*forceUnroll=*/true);
+            /*forceUnroll=*/true, /*useIndexDiffs=*/true);
         {
           OpBuilder::InsertionGuard guard(thenb);
           thenb.setInsertionPointToStart(loop.getBody());
@@ -1420,7 +1420,7 @@ struct GridwiseAttentionAccelRewritePattern
           Block::BlockArgListType lowerCoords = loop.getLowerCoords(0);
           Block::BlockArgListType upperCoords = loop.getLowerCoords(1);
           auto isInvalid = thenb.create<arith::CmpIOp>(
-              loc, arith::CmpIPredicate::sge, lowerCoords[2], currentSeqLen);
+              loc, arith::CmpIPredicate::uge, lowerCoords[2], currentSeqLen);
           scf::IfOp ifb = thenb.create<scf::IfOp>(loc, isInvalid,
                                                   /*withElseRegion=*/false);
           {
