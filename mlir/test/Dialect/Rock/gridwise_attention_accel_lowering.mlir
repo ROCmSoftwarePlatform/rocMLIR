@@ -307,7 +307,9 @@ func.func @gridwise_attn_issue_1661_workaround(%arg0: memref<256xf16>, %arg1: me
   // CHECK-NEXT: scf.if %[[cmpres]]
   // CHECK-NEXT: rock.in_bounds_store %[[neginf]] -> %{{.*}}[%{{.*}}] : f16 -> memref<32xf16, #gpu.address_space<private>>, index
   rock.gridwise_attention_accel(%5, %1, %2, %6) features =  dot|atomic_add|atomic_fmax_f32|wmma preSoftmaxOps = {
-  } {arch = "amdgcn-amd-amdhsa:gfx1100", blockSize = 32 : i32, firstGemmIdx = 0 : i32, gridSize = 4 : i32, params0 = #rock.wmma_gemm_params<kpackPerBlock = 32, mPerBlock = 32, nPerBlock = 32, kpack = 1, mPerWave = 32, nPerWave = 32, splitKFactor = 1, forceUnroll = true>, params1 = #rock.wmma_gemm_params<kpackPerBlock = 32, mPerBlock = 32, nPerBlock = 32, kpack = 1, mPerWave = 32, nPerWave = 32, splitKFactor = 1, forceUnroll = true>, prePadG0N = 1 : index} : memref<4x64x32xf16>, memref<4x64x384xf16>, memref<4x384x64xf16>, memref<4x32x64xf16>
+  } {arch = "amdgcn-amd-amdhsa:gfx1100", blockSize = 32 : i32, firstGemmIdx = 0 : i32, gridSize = 4 : i32, operandSegmentSizes = array<i32: 1, 1, 1, 0, 0, 1>, params0 = #rock.wmma_gemm_params<kpackPerBlock = 32, mPerBlock = 32, nPerBlock = 32, kpack = 1, mPerWave = 32, nPerWave = 32, splitKFactor = 1, forceUnroll = true>, params1 = #rock.wmma_gemm_params<kpackPerBlock = 32, mPerBlock = 32, nPerBlock = 32, kpack = 1, mPerWave = 32, nPerWave = 32, splitKFactor = 1, forceUnroll = true>, prePadG0N = 1 : index} : memref<4x64x32xf16>, memref<4x64x384xf16>, memref<4x384x64xf16>, memref<4x32x64xf16>
+  return
+}
 
 // -----
 
