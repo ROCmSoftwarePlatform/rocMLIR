@@ -101,9 +101,18 @@ static mlir::Value linalgBroadcastAndMaybeExtSI(PatternRewriter &rewriter,
   // The source tensor is broadcast to all the outer dimensions of the
   // result tensor.
   SmallVector<AffineExpr> sourceDims;
-  for (auto dim : llvm::seq<int64_t>(0, sourceRank)) {
-    auto expr = rewriter.getAffineDimExpr(dim + resultRank - sourceRank);
-    sourceDims.push_back(expr);
+  // In the case of a rank one source tensor with a single element TOSA
+  // specifies that the value be broadcast meaning we need an edge case for a
+  // constant map.
+  assert(sourceTy.hasStaticShape() &&
+         "Dynamic broadcasting shapes not supported!");
+  if (sourceRank == 1 && sourceTy.getDimSize(0) == 1) {
+    sourceDims.push_back(rewriter.getAffineConstantExpr(0));
+  } else {
+    for (auto dim : llvm::seq<int64_t>(0, sourceRank)) {
+      auto expr = rewriter.getAffineDimExpr(dim + resultRank - sourceRank);
+      sourceDims.push_back(expr);
+    }
   }
 
   // Creating maps for the input and output of the broacast-like generic op.
@@ -253,12 +262,14 @@ public:
     }
 
     if (group > 1 && isConv2DOp &&
-        !std::is_same<LinalgConvOp, linalg::Conv2DNhwgcGfhwcOp>::value && !std::is_same<LinalgConvOp, linalg::Conv2DNhwcHwcfOp>::value )
+        !std::is_same<LinalgConvOp, linalg::Conv2DNhwgcGfhwcOp>::value &&
+        !std::is_same<LinalgConvOp, linalg::Conv2DNhwcHwcfOp>::value)
       return rewriter.notifyMatchFailure(
           op, "tosa.conv ops should map to grouped convolution ops");
-    
-    if (group == 1 && isConv2DOp && 
-        !std::is_same<LinalgConvOp, linalg::Conv2DNhwcFhwcOp>::value && !std::is_same<LinalgConvOp, linalg::Conv2DNhwcHwcfOp>::value)
+
+    if (group == 1 && isConv2DOp &&
+        !std::is_same<LinalgConvOp, linalg::Conv2DNhwcFhwcOp>::value &&
+        !std::is_same<LinalgConvOp, linalg::Conv2DNhwcHwcfOp>::value)
       return rewriter.notifyMatchFailure(
           op, "tosa.conv ops should map to non-grouped convolution ops");
 
@@ -309,7 +320,7 @@ public:
     input = applyPad(loc, input, pad, zeroAttr, rewriter);
 
     auto weightShape = weightTy.getShape();
-    SmallVector<int64_t> weightPerm;
+    SmallVector<int32_t> weightPerm;
 
     auto resultShape = resultTy.getShape();
     auto newResultTy = resultTy;
@@ -330,20 +341,21 @@ public:
       weight = rewriter.create<tosa::ReshapeOp>(
           loc, RankedTensorType::get(newWeightShape, weightTy.getElementType()),
           weight, rewriter.getDenseI64ArrayAttr(newWeightShape));
-    }else {
+    } else {
 
       if (4 == inputTy.getRank()) {
         // For 2D convolutions, we need to check if the target convolution op
         // wants a HWCF kernel layout.
         bool wantHwcf =
-            isQuantized ? std::is_same_v<LinalgConvQOp, linalg::Conv2DNhwcHwcfQOp>
-                        : std::is_same_v<LinalgConvOp, linalg::Conv2DNhwcHwcfOp>;
+            isQuantized
+                ? std::is_same_v<LinalgConvQOp, linalg::Conv2DNhwcHwcfQOp>
+                : std::is_same_v<LinalgConvOp, linalg::Conv2DNhwcHwcfOp>;
         if (wantHwcf) {
           // Transpose the kernel to match dimension ordering of the linalg
           // convolution operation.
-          // TODO(suderman): See if this can be efficiently folded - check whether
-          // the input is used anywhere else, if not fold the constant.
-          SmallVector<int64_t> weightPerm;
+          // TODO(suderman): See if this can be efficiently folded - check
+          // whether the input is used anywhere else, if not fold the constant.
+          SmallVector<int32_t> weightPerm;
           for (int i = 1; i < resultTy.getRank(); i++)
             weightPerm.push_back(i);
           weightPerm.push_back(0);
@@ -351,7 +363,7 @@ public:
           SmallVector<int64_t> newWeightShape;
           for (auto dim : weightPerm)
             newWeightShape.push_back(weightShape[dim]);
-          auto weightPermAttr = rewriter.getI64TensorAttr(weightPerm);
+          auto weightPermAttr = rewriter.getI32TensorAttr(weightPerm);
           Value weightPermValue =
               rewriter.create<arith::ConstantOp>(loc, weightPermAttr);
           Type newWeightTy =
@@ -361,13 +373,13 @@ public:
         }
       }
 
-      // For Conv3D transpose the kernel to match dimension ordering of the linalg
-      // convolution operation. Conv2D has a 1-1 mapping in linalg so better to
-      // map directly and then transpose later if desired.
+      // For Conv3D transpose the kernel to match dimension ordering of the
+      // linalg convolution operation. Conv2D has a 1-1 mapping in linalg so
+      // better to map directly and then transpose later if desired.
       if (5 == inputTy.getRank()) {
         // TODO(suderman): See if this can be efficiently folded - check whether
         // the input is used anywhere else, if not fold the constant.
-        SmallVector<int64_t> weightPerm;
+        SmallVector<int32_t> weightPerm;
         for (int i = 1; i < resultTy.getRank(); i++)
           weightPerm.push_back(i);
         weightPerm.push_back(0);
@@ -375,7 +387,7 @@ public:
         SmallVector<int64_t> newWeightShape;
         for (auto dim : weightPerm)
           newWeightShape.push_back(weightShape[dim]);
-        auto weightPermAttr = rewriter.getI64TensorAttr(weightPerm);
+        auto weightPermAttr = rewriter.getI32TensorAttr(weightPerm);
         Value weightPermValue =
             rewriter.create<arith::ConstantOp>(loc, weightPermAttr);
         Type newWeightTy =
@@ -384,7 +396,7 @@ public:
                                                     weightPermValue);
       }
     }
-    
+
     if (isConv2DOp && group > 1) {
       SmallVector<int64_t, 5> newResultShape{resultShape[0], resultShape[1],
                                              resultShape[2], group,
@@ -408,8 +420,8 @@ public:
 
     if (isConv2DOp && group > 1) {
       broadcastBias = rewriter.create<tosa::ReshapeOp>(
-        loc, RankedTensorType::get(newResultTy.getShape(), resultETy),
-        broadcastBias, rewriter.getDenseI64ArrayAttr(newResultTy.getShape()));
+          loc, RankedTensorType::get(newResultTy.getShape(), resultETy),
+          broadcastBias, rewriter.getDenseI64ArrayAttr(newResultTy.getShape()));
     }
 
     Value conv;
@@ -429,16 +441,16 @@ public:
               ->getResult(0);
     } else {
       conv = rewriter
-        .create<LinalgConvOp>(
-          loc, newResultTy, ValueRange{input, weight},
-          ValueRange{broadcastBias}, strideAttr, dilationAttr)
-        ->getResult(0);
+                 .create<LinalgConvOp>(
+                     loc, newResultTy, ValueRange{input, weight},
+                     ValueRange{broadcastBias}, strideAttr, dilationAttr)
+                 ->getResult(0);
     }
 
     if (isConv2DOp && group > 1) {
       conv = rewriter.create<tosa::ReshapeOp>(
-      loc, RankedTensorType::get(resultShape, resultETy), conv,
-      rewriter.getDenseI64ArrayAttr(resultShape));
+          loc, RankedTensorType::get(resultShape, resultETy), conv,
+          rewriter.getDenseI64ArrayAttr(resultShape));
     }
 
     rewriter.replaceOp(op, conv);
@@ -1063,7 +1075,8 @@ public:
             auto max = rewriter.create<arith::ConstantIntOp>(
                 loc, APInt::getSignedMaxValue(outBitwidth).getSExtValue(),
                 accETy);
-            auto clamp = clampIntHelper(loc, scaled, min, max, rewriter);
+            auto clamp = clampIntHelper(loc, scaled, min, max, rewriter,
+                                        /*isUnsigned=*/false);
 
             poolVal = clamp;
             // Convert type.
@@ -1087,22 +1100,25 @@ public:
 
   LogicalResult matchAndRewrite(tosa::TransposeOp op,
                                 PatternRewriter &rewriter) const final {
-    SmallVector<int64_t> constantPerms;
+    SmallVector<int32_t> constantPerms;
     if (failed(op.getConstantPerms(constantPerms)))
       return failure();
 
     Location loc = op.getLoc();
-    // The verifier should have made sure we have a valid permutation tensor.
-    assert(isPermutationVector(constantPerms) && "Expected valid permutation");
+    // The verifier should have made sure we have a valid TOSA permutation
+    // tensor. isPermutationVector doesn't actually check the TOSA perms we
+    // expect.
     SmallVector<OpFoldResult> inputSizes =
         tensor::getMixedSizes(rewriter, loc, op.getInput1());
     auto permutedSizes =
-        applyPermutation<OpFoldResult>(inputSizes, constantPerms);
+        applyTOSAPermutation<OpFoldResult>(inputSizes, constantPerms);
 
     auto permutedInit = rewriter.create<tensor::EmptyOp>(
         loc, permutedSizes, op.getInput1().getType().getElementType());
     rewriter.replaceOpWithNewOp<linalg::TransposeOp>(
-        op, op.getInput1(), permutedInit, constantPerms);
+        op, op.getInput1(), permutedInit,
+        llvm::to_vector(llvm::map_range(
+            constantPerms, [](int32_t v) -> int64_t { return v; })));
     return success();
   }
 };

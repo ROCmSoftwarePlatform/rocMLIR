@@ -38,6 +38,7 @@
 #include "llvm/Support/VirtualFileSystem.h"
 
 #include <fstream>
+#include <memory>
 #include <stdlib.h>
 
 using namespace llvm;
@@ -78,14 +79,10 @@ StringRef StripGNUInstallLibDir(StringRef Path) {
   StringRef SecondLevelParentName =
       llvm::sys::path::filename(SecondLevelParentDir);
 
-  if (ParentName == "lib") {
+  if (ParentName == "lib" || ParentName == "lib64") {
     ParentDir = llvm::sys::path::parent_path(ParentDir);
-    ParentName = llvm::sys::path::filename(ParentDir);
-  } else if (ParentName == "lib64") {
-    ParentDir = llvm::sys::path::parent_path(ParentDir);
-    ParentName = llvm::sys::path::filename(ParentDir);
   } else if (SecondLevelParentName == "lib") {
-    ParentDir = SecondLevelParentDir;
+    ParentDir = llvm::sys::path::parent_path(SecondLevelParentDir);
   }
 
   return ParentDir;
@@ -245,18 +242,18 @@ public:
   }
 };
 
-InstallationDetector *CreatePathDetector(StringRef Path,
-                                         bool isComgrPath = false) {
+std::shared_ptr<InstallationDetector>
+CreatePathDetector(StringRef Path, bool isComgrPath = false) {
   StringRef DirName = llvm::sys::path::filename(Path);
   if ((!isComgrPath && DirName.starts_with("rocm-cmake-")) ||
       (isComgrPath && DirName.starts_with("comgr-"))) {
-    return new SpackInstallationDetector(Path, isComgrPath);
+    return std::make_shared<SpackInstallationDetector>(Path, isComgrPath);
   }
 
-  return new InstallationDetector(Path, isComgrPath);
+  return std::make_shared<InstallationDetector>(Path, isComgrPath);
 }
 
-InstallationDetector *getDetectorImpl() {
+std::shared_ptr<InstallationDetector> getDetectorImpl() {
   SmallString<128> ROCmInstallPath;
 
   static const char *EnvROCMPath = std::getenv("ROCM_PATH");
@@ -264,21 +261,16 @@ InstallationDetector *getDetectorImpl() {
     ROCmInstallPath = EnvROCMPath;
   }
 
-  InstallationDetector *Detector;
   if (ROCmInstallPath == "") {
     std::string ComgrInstallationPath = getComgrInstallPathFromExecutable();
-    Detector =
-        CreatePathDetector(ComgrInstallationPath, true /* isComgrPath */);
-  } else {
-    Detector = CreatePathDetector(ROCmInstallPath);
+    return CreatePathDetector(ComgrInstallationPath, true /* isComgrPath */);
   }
-
-  return Detector;
+  return CreatePathDetector(ROCmInstallPath);
 }
 
 InstallationDetector *getDetector() {
-  static InstallationDetector *Detector = getDetectorImpl();
-  return Detector;
+  static auto Detector = getDetectorImpl();
+  return Detector.get();
 }
 
 llvm::StringRef getROCMPath() { return getDetector()->getROCmPath(); }

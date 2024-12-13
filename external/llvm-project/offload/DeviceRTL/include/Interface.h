@@ -14,8 +14,9 @@
 
 #include "Shared/Environment.h"
 
-#include "Types.h"
+#include "DeviceTypes.h"
 #include "extra_allocators.h"
+
 
 /// External API
 ///
@@ -227,6 +228,9 @@ int32_t __kmpc_target_init(KernelEnvironmentTy &KernelEnvironment,
 
 void __kmpc_target_deinit();
 
+// Initializer for a specialized kernel. No finalizer is provided currently.
+void __kmpc_specialized_kernel_init();
+
 ///}
 
 /// Reduction
@@ -360,6 +364,7 @@ int32_t __kmpc_cancel(IdentTy *Loc, int32_t TId, int32_t CancelVal);
 ///{
 int32_t __kmpc_shuffle_int32(int32_t val, int16_t delta, int16_t size);
 int64_t __kmpc_shuffle_int64(int64_t val, int16_t delta, int16_t size);
+
 ///}
 }
 

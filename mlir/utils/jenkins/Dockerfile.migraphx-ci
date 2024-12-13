@@ -1,10 +1,10 @@
-FROM rocm/mlir:rocm6.1-latest
-ARG ROCM_PATH=/opt/rocm-6.1
+FROM rocm/mlir:rocm6.2-latest
+ARG ROCM_PATH=/opt/rocm-6.2
 
 # --------------------- Section 4: MIGraphX dependencies ---------------
 WORKDIR /MIGraphXDeps
 RUN pip3 install setuptools wheel
-RUN pip3 install onnxruntime==1.10.0
+RUN pip3 install onnx==1.14.1 onnxruntime
 RUN pip3 install https://github.com/RadeonOpenCompute/rbuild/archive/master.tar.gz
 ENV MIGRAPHX_REF=develop
 RUN wget https://raw.githubusercontent.com/ROCm/AMDMIGraphX/${MIGRAPHX_REF}/requirements.txt \

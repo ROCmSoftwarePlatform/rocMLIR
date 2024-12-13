@@ -153,9 +153,6 @@ public:
       CodeGenFunction &CGF,
       const std::pair<llvm::Value *, llvm::Value *> &AddrSizePair) override;
 
-  /// Get the GPU warp size.
-  llvm::Value *getGPUWarpSize(CodeGenFunction &CGF);
-
   /// Get the id of the current thread on the GPU.
   llvm::Value *getGPUThreadID(CodeGenFunction &CGF);
 
@@ -167,6 +164,9 @@ public:
 
   /// Get the number of blocks on the GPU
   llvm::Value *getGPUNumBlocks(CodeGenFunction &CGF);
+
+  /// Initialization for a specialized kernel.
+  llvm::Value *initSpecializedKernel(CodeGenFunction &CGF);
 
   std::pair<llvm::Value *, llvm::Value *>
   getXteamRedFunctionPtrs(CodeGenFunction &CGF, llvm::Type *RedVarType);

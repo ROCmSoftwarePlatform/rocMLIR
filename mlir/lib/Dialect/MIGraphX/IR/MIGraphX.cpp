@@ -19,10 +19,10 @@
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/TypeUtilities.h"
 #include "mlir/IR/Value.h"
-#include "mlir/Support/MathExtras.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/SMLoc.h"
 
 #include "mlir/Dialect/MIGraphX/IR/MIGraphXDialect.cpp.inc"
@@ -58,7 +58,7 @@ void MIGraphXDialect::initialize() {
 Operation *MIGraphXDialect::materializeConstant(OpBuilder &builder,
                                                 Attribute value, Type type,
                                                 Location loc) {
-  if (!type.isa<MIXRShapedType>())
+  if (!isa<MIXRShapedType>(type))
     return nullptr;
   ElementsAttr elemsValue = dyn_cast<ElementsAttr>(value);
   if (!elemsValue)
@@ -246,7 +246,20 @@ RankedTensorType MIXRShapedType::asMemoryLayoutTensor() const {
       orderedShape[prevIdx] = stride / prevStride;
     }
   }
-  return RankedTensorType::get(orderedShape, getElementType());
+  Type elementType = getElementType();
+  if (elementType.isInteger() && !elementType.isSignlessInteger()) {
+    elementType =
+        IntegerType::get(getContext(), elementType.getIntOrFloatBitWidth(),
+                         IntegerType::SignednessSemantics::Signless);
+  }
+  return RankedTensorType::get(orderedShape, elementType);
+}
+
+RankedTensorType MIXRShapedType::asFlatMemoryTensor() const {
+  RankedTensorType memoryTensorType = asMemoryLayoutTensor();
+  if (!memoryTensorType)
+    return nullptr;
+  return memoryTensorType.clone(memoryTensorType.getNumElements());
 }
 
 void MIXRShapedType::getStridePermutation(SmallVectorImpl<int64_t> &ret) const {
@@ -297,5 +310,21 @@ LogicalResult LiteralOp::verify() {
       expectedStride *= len;
     }
   }
+  return success();
+}
+
+LogicalResult UnpackOp::verify() {
+  MIXRShapedType inType = getIn().getType();
+  MIXRShapedType outType = getOut().getType();
+  int64_t axis = getAxis();
+
+  if (axis < 0 || axis > inType.getRank())
+    return emitOpError("axis out of range of shape: ") << axis;
+  // If we're not an int8 <-> int8 operator, we're in the middle of rewrites.
+  if (inType.getElementType().isInteger(8) &&
+      outType.getElementType().isInteger(8) &&
+      inType.getDimSize(axis) * 2 != outType.getDimSize(axis))
+    return emitOpError("expected length along input axis to be half the length "
+                       "along output axis");
   return success();
 }

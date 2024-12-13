@@ -606,7 +606,7 @@ Running tests in QEMU System Emulation Environment
 ``````````````````````````````````````````````````
 
 QEMU can be used to test LLDB in an emulation environment in the absence of
-actual hardware. :doc:`/use/qemu-testing` describes how to setup an
+actual hardware. :doc:`/resources/qemu-testing` describes how to setup an
 emulation environment using QEMU helper scripts found in
 ``llvm-project/lldb/scripts/lldb-test-qemu``. These scripts currently
 work with Arm or AArch64, but support for other architectures can be added easily.
@@ -618,9 +618,9 @@ On non-Windows platforms, you can use the ``-d`` option to ``dotest.py`` which
 will cause the script to print out the pid of the test and wait for a while
 until a debugger is attached. Then run ``lldb -p <pid>`` to attach.
 
-To instead debug a test's python source, edit the test and insert
-``import pdb; pdb.set_trace()`` at the point you want to start debugging. In
-addition to pdb's debugging facilities, lldb commands can be executed with the
+To instead debug a test's python source, edit the test and insert ``import pdb; pdb.set_trace()`` or ``breakpoint()`` (Python 3 only) at the point you want to start debugging. The ``breakpoint()`` command can be used for any LLDB Python script, not just for API tests.
+
+In addition to pdb's debugging facilities, lldb commands can be executed with the
 help of a pdb alias. For example ``lldb bt`` and ``lldb v some_var``. Add this
 line to your ``~/.pdbrc``:
 

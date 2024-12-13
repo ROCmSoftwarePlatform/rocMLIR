@@ -31,6 +31,7 @@ if (ROCMLIR_DRIVER_PR_E2E_TEST_ENABLED)
     PrAttentionF32
     PrAttentionF16
     PrAttentionI8
+    PrGemmSplitK
   )
   set(GEN_MODE "")
 endif()
@@ -54,22 +55,23 @@ if (ROCK_E2E_TEST_ENABLED)
   endif()
   if (ROCK_E2E_TEST_SUITES STREQUAL "" OR ROCK_E2E_TEST_SUITES STREQUAL "part4")
     list(APPEND CONFIGS
-    conv2d_regression_fwd
-    conv2d_regression_fwd_nonNavi3x
-    conv2d_regression_fwd_navi3x
+    conv_regression_fwd
+    conv_regression_fwd_nonNavi3x
+    conv_regression_fwd_navi3x
     )
   endif()
   if (ROCK_E2E_TEST_SUITES STREQUAL "" OR ROCK_E2E_TEST_SUITES STREQUAL "part5")
     list(APPEND CONFIGS
-    conv2d_regression_bwd
-    conv2d_wrw_perf_config
+    conv_regression_bwd
+    conv_wrw_perf_config
     Resnet101Config
     )
    endif()
    if (ROCK_E2E_TEST_SUITES STREQUAL "" OR ROCK_E2E_TEST_SUITES STREQUAL "part6")
     list(APPEND CONFIGS
     gemm_with_atomic_add
-    gemm_split_k
+    gemm_split_k_f16
+    gemm_split_k_f32
     )
    endif()
 endif()
@@ -89,7 +91,7 @@ add_custom_command(OUTPUT ${LOCAL_CONFIG_FILE_BIN}
 
 # Add a command to generate E2E tests for each config file
 # We use a xxx.cfg file associated with xxx.toml file to apply additional guards on the tests.
-# Check conv2d_wrw_perf_config as an example to guard the tests on mfma supported GPUs only.
+# Check conv_wrw_perf_config as an example to guard the tests on mfma supported GPUs only.
 # The assumption is that the directory name in xxx.toml is the same as xxx.
 foreach(config ${CONFIGS})
   set(config_file ${CONFIG_DIR}/${config}.toml)

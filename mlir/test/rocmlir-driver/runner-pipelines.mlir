@@ -2,7 +2,7 @@
 // RUN: rocmlir-driver -dump-pipelines -host-pipeline=runner -arch=gfx90a /dev/null -o /dev/null 2>&1 | FileCheck %s --check-prefix=RUNNER
 
 // RUNNER: Host runner pipeline:
-// RUNNER-NEXT: {{^}}builtin.module(func.func(mhal-select-targets{archs=amdgcn-amd-amdhsa:gfx90a target-types=GPU}),
+// RUNNER-NEXT: {{^}}builtin.module(func.func(mhal-select-targets{archs={amdgcn-amd-amdhsa:gfx90a} target-types={GPU}}),
 // RUNNER-SAME: func.func(convert-linalg-to-affine-loops,
 // RUNNER-SAME: lower-affine,
 // RUNNER-SAME: expand-strided-metadata,
@@ -22,6 +22,6 @@
 // RUNNER-SAME: async-runtime-ref-counting-opt),
 // RUNNER-SAME: symbol-dce,
 // RUNNER-SAME: convert-async-to-llvm,
-// RUNNER-SAME: gpu-to-llvm{gpu-binary-annotation=gpu.binary use-bare-pointers-for-host=false use-bare-pointers-for-kernels=true},
+// RUNNER-SAME: gpu-to-llvm{use-bare-pointers-for-host=false use-bare-pointers-for-kernels=true},
 // RUNNER-SAME: convert-func-to-llvm{index-bitwidth=0 use-bare-ptr-memref-call-conv=false},
 // RUNNER-SAME: reconcile-unrealized-casts){{$}}

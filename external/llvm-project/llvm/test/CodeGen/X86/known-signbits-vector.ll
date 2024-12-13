@@ -220,11 +220,10 @@ define float @signbits_ashr_insert_ashr_extract_sitofp(i64 %a0, i64 %a1) nounwin
 ; X86:       # %bb.0:
 ; X86-NEXT:    pushl %eax
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
-; X86-NEXT:    movl %eax, %ecx
-; X86-NEXT:    sarl $30, %ecx
-; X86-NEXT:    shll $2, %eax
 ; X86-NEXT:    vmovd %eax, %xmm0
-; X86-NEXT:    vpinsrd $1, %ecx, %xmm0, %xmm0
+; X86-NEXT:    sarl $30, %eax
+; X86-NEXT:    vpslld $2, %xmm0, %xmm0
+; X86-NEXT:    vpinsrd $1, %eax, %xmm0, %xmm0
 ; X86-NEXT:    vpsrlq $3, %xmm0, %xmm0
 ; X86-NEXT:    vcvtdq2ps %xmm0, %xmm0
 ; X86-NEXT:    vmovss %xmm0, (%esp)
@@ -694,7 +693,7 @@ declare <2 x double> @llvm.x86.sse2.cmp.sd(<2 x double>, <2 x double>, i8 immarg
 ; so we can avoid having to shift bit 0 into bit 7 for each element due to
 ; v32i1->v32i8 promotion and the splitting of v32i8 into 2xv16i8. This requires
 ; ComputeNumSignBits handling for insert_subvector.
-define void @cross_bb_signbits_insert_subvec(<32 x i8>* %ptr, <32 x i8> %x, <32 x i8> %z) {
+define void @cross_bb_signbits_insert_subvec(ptr %ptr, <32 x i8> %x, <32 x i8> %z) {
 ; X86-LABEL: cross_bb_signbits_insert_subvec:
 ; X86:       # %bb.0:
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
@@ -739,7 +738,7 @@ define void @cross_bb_signbits_insert_subvec(<32 x i8>* %ptr, <32 x i8> %x, <32 
 
 block:
   %d = select <32 x i1> %c, <32 x i8> <i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1>, <32 x i8> %z
-  store <32 x i8> %d, <32 x i8>* %ptr, align 32
+  store <32 x i8> %d, ptr %ptr, align 32
   br label %exit
 
 exit:

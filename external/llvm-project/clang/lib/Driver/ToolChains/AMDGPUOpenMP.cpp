@@ -105,7 +105,7 @@ static void addOptLevelArg(const llvm::opt::ArgList &Args,
       OOpt = "3";
   }
   // To remove unreferenced internalized functions, add globaldce pass to O0
-  if (OOpt.equals("0") && !IsLlc)
+  if (OOpt == "0" && !IsLlc)
     CmdArgs.push_back(Args.MakeArgString("-passes=default<O0>,globaldce"));
   else
     CmdArgs.push_back(Args.MakeArgString("-O" + OOpt));
@@ -210,7 +210,8 @@ const char *amdgpu::dlr::getLinkCommandArgs(
     llvm::opt::ArgStringList &LastLinkArgs, const ToolChain &TC,
     const llvm::Triple &Triple, llvm::StringRef TargetID,
     llvm::StringRef OutputFilePrefix, const char *InputFileName,
-    const RocmInstallationDetector &RocmInstallation) {
+    const RocmInstallationDetector &RocmInstallation,
+    llvm::opt::ArgStringList &EnvironmentLibraryPaths) {
   LastLinkArgs.push_back(Args.MakeArgString(InputFileName));
 
   // Get the environment variable ROCM_LINK_ARGS and add to llvm-link.
@@ -263,8 +264,23 @@ const char *amdgpu::dlr::getLinkCommandArgs(
   if (LibSuffix != "lib" || llvm::sys::fs::exists(Path)) {
     BCLibs.push_back(Args.MakeArgString(Path));
   } else {
-    std::string RtDir = "/../runtimes/runtimes-bins/offload";
-    BCLibs.push_back(Args.MakeArgString(libpath + RtDir + LibDeviceName));
+    // Check if the device library can be found in
+    // one of the LIBRARY_PATH directories.
+    bool EnvOmpLibDeviceFound = false;
+    for (auto &EnvLibraryPath : EnvironmentLibraryPaths) {
+      std::string EnvOmpLibDevice = EnvLibraryPath + LibDeviceName;
+      if (llvm::sys::fs::exists(EnvOmpLibDevice)) {
+        EnvOmpLibDeviceFound = true;
+        BCLibs.push_back(EnvOmpLibDevice);
+        break;
+      }
+    }
+    // If LIBRARY_PATH doesn't point to the device library,
+    // then use the default one.
+    if (!EnvOmpLibDeviceFound) {
+      std::string RtDir = "/../runtimes/runtimes-bins/offload";
+      BCLibs.push_back(Args.MakeArgString(libpath + RtDir + LibDeviceName));
+    }
   }
 
   if (!AsanRTL.empty()) {
@@ -372,7 +388,7 @@ const char *amdgpu::dlr::getLldCommandArgs(
 AMDGPUOpenMPToolChain::AMDGPUOpenMPToolChain(const Driver &D, const llvm::Triple &Triple,
                              const ToolChain &HostTC, const ArgList &Args,
                              const Action::OffloadKind OK)
-    : ROCMToolChain(D, Triple, Args), HostTC(HostTC), OK(OK) {
+    : ROCMToolChain(D, Triple, Args), HostTC(HostTC) {
   // Lookup binaries into the driver directory, this is used to
   // discover the 'amdgpu-arch' executable.
   getProgramPaths().push_back(getDriver().Dir);
@@ -386,8 +402,8 @@ void AMDGPUOpenMPToolChain::addClangTargetOptions(
   StringRef GPUArch = DriverArgs.getLastArgValue(options::OPT_march_EQ);
   assert(!GPUArch.empty() && "Must have an explicit GPU arch.");
 
-  CC1Args.push_back("-target-cpu");
-  CC1Args.push_back(DriverArgs.MakeArgStringRef(GPUArch));
+  assert(DeviceOffloadingKind == Action::OFK_OpenMP &&
+         "Only OpenMP offloading kinds are supported.");
 
   // Extract all the -m options
   std::vector<llvm::StringRef> Features;
@@ -398,8 +414,6 @@ void AMDGPUOpenMPToolChain::addClangTargetOptions(
     CC1Args.push_back("-target-feature");
     CC1Args.push_back(OneFeature.data());
   }
-
-  CC1Args.push_back("-fcuda-is-device");
 
   if (DriverArgs.hasFlag(options::OPT_fgpu_approx_transcendentals,
                          options::OPT_fno_gpu_approx_transcendentals, false))
@@ -421,7 +435,10 @@ void AMDGPUOpenMPToolChain::addClangTargetOptions(
                          options::OPT_fno_gpu_allow_device_init, false))
     CC1Args.push_back("-fgpu-allow-device-init");
 
-  CC1Args.push_back("-fcuda-allow-variadic-functions");
+  // TODO: check if flag is needed for the opaque linker case
+  const char *UseLinkerWrapper = std::getenv("CLANG_USE_LINKER_WRAPPER");
+  if (!UseLinkerWrapper || atoi(UseLinkerWrapper) == 0)
+    CC1Args.push_back("-fcuda-allow-variadic-functions");
 
   // Default to "hidden" visibility, as object level linking will not be
   // supported for the foreseeable future.
@@ -449,7 +466,7 @@ void AMDGPUOpenMPToolChain::addClangTargetOptions(
     LibraryPaths.push_back(DriverArgs.MakeArgString(Path));
 
   // Link the bitcode library late if we're using device LTO.
-  if (getDriver().isUsingLTO(/* IsOffload */ true))
+  if (getDriver().isUsingOffloadLTO())
     return;
 
   std::string BitcodeSuffix;
@@ -492,7 +509,7 @@ llvm::opt::DerivedArgList *AMDGPUOpenMPToolChain::TranslateArgs(
               llvm::formatv("{0}", llvm::fmt_consume(ArchsOrErr.takeError()));
           getDriver().Diag(diag::err_drv_undetermined_gpu_arch)
               << llvm::Triple::getArchTypeName(getArch()) << ErrMsg << "-march";
-          Arch = CudaArchToString(CudaArch::HIPDefault);
+          Arch = OffloadArchToString(OffloadArch::HIPDefault);
         } else {
           Arch = Args.MakeArgString(ArchsOrErr->front());
         }

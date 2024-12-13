@@ -12,6 +12,7 @@
 
 #include "device.h"
 #include "OffloadEntry.h"
+#include "OmptCommonDefs.h"
 #include "OmptTracing.h"
 #include "OpenMP/Mapping.h"
 #include "OpenMP/OMPT/Callback.h"
@@ -66,7 +67,7 @@ int HostDataToTargetTy::addEventIfNecessary(DeviceTy &Device,
   return OFFLOAD_SUCCESS;
 }
 
-DeviceTy::DeviceTy(PluginAdaptorTy *RTL, int32_t DeviceID, int32_t RTLDeviceID)
+DeviceTy::DeviceTy(GenericPluginTy *RTL, int32_t DeviceID, int32_t RTLDeviceID)
     : DeviceID(DeviceID), RTL(RTL), RTLDeviceID(RTLDeviceID),
       ForceSynchronousTargetRegions(false), MappingInfo(*this) {}
 
@@ -78,21 +79,18 @@ DeviceTy::~DeviceTy() {
   dumpTargetPointerMappings(&Loc, *this);
 }
 
-llvm::Error DeviceTy::init() {
-  // Make call to init_requires if it exists for this plugin.
-  int32_t Ret = 0;
-  Ret = RTL->init_requires(PM->getRequirements());
-  if (Ret != OFFLOAD_SUCCESS)
-    return llvm::createStringError(
-        llvm::inconvertibleErrorCode(),
-        "Failed to initialize requirements for device %d\n", DeviceID);
+/// Used to set the asynchronous execution mode
+inline void setAsyncInfoSynchronous(__tgt_async_info *AI, bool SetSynchronous) {
+  if (SetSynchronous)
+    AI->ExecAsync = false;
+}
 
-  Ret = RTL->init_device(RTLDeviceID);
+llvm::Error DeviceTy::init() {
+  int32_t Ret = RTL->init_device(RTLDeviceID);
   if (Ret != OFFLOAD_SUCCESS)
     return llvm::createStringError(llvm::inconvertibleErrorCode(),
                                    "Failed to initialize device %d\n",
                                    DeviceID);
-  assert(RTL->number_of_team_procs && "Need function pointer to entry point");
   setTeamProcs(RTL->number_of_team_procs(RTLDeviceID));
 
   // Enables recording kernels if set.
@@ -128,7 +126,6 @@ void *DeviceTy::allocData(int64_t Size, void *HstPtr, int32_t Kind) {
           RegionInterface.getCallbacks<ompt_target_data_alloc>(), DeviceID,
           HstPtr, &TargetPtr, Size,
           /*CodePtr=*/OMPT_GET_RETURN_ADDRESS);
-      // ToDo: mhalk Do we need a check for TracingActive here?
       InterfaceRAII TargetDataAllocTraceRAII(
           RegionInterface.getTraceGenerators<ompt_target_data_alloc>(),
           RTLDeviceID, HstPtr, &TargetPtr, Size,
@@ -145,7 +142,6 @@ int32_t DeviceTy::deleteData(void *TgtAllocBegin, int32_t Kind) {
           RegionInterface.getCallbacks<ompt_target_data_delete>(), DeviceID,
           TgtAllocBegin,
           /*CodePtr=*/OMPT_GET_RETURN_ADDRESS);
-      // ToDo: mhalk Do we need a check for TracingActive here?
       InterfaceRAII TargetDataDeleteTraceRAII(
           RegionInterface.getTraceGenerators<ompt_target_data_delete>(),
           DeviceID, TgtAllocBegin,
@@ -167,19 +163,17 @@ int32_t DeviceTy::submitData(void *TgtPtrBegin, void *HstPtrBegin, int64_t Size,
           RegionInterface.getCallbacks<ompt_target_data_transfer_to_device>(),
           omp_get_initial_device(), HstPtrBegin, DeviceID, TgtPtrBegin, Size,
           /*CodePtr=*/OMPT_GET_RETURN_ADDRESS);
-      // ToDo: mhalk Do we need a check for TracingActive here?
-      InterfaceRAII TargetDataSubmitTraceRAII(
+      // Only if 'TracedDeviceId' is actually traced, AsyncInfo->OmptEventInfo
+      // is set and a trace record generated. Otherwise: No OMPT device tracing.
+      TracerInterfaceRAII TargetDataSubmitTraceRAII(
           RegionInterface
               .getTraceGenerators<ompt_target_data_transfer_to_device>(),
-          omp_get_initial_device(), HstPtrBegin, DeviceID, TgtPtrBegin, Size,
+          AsyncInfo, /*TracedDeviceId=*/DeviceID,
+          /*EventType=*/ompt_callback_target_data_op, omp_get_initial_device(),
+          HstPtrBegin, DeviceID, TgtPtrBegin, Size,
           /*CodePtr=*/OMPT_GET_RETURN_ADDRESS);)
 
-#ifdef OMPT_SUPPORT
-  if (ForceSynchronousTargetRegions || !AsyncInfo || ompt::TracingActive)
-#else
-  if (ForceSynchronousTargetRegions || !AsyncInfo)
-#endif
-    return RTL->data_submit(RTLDeviceID, TgtPtrBegin, HstPtrBegin, Size);
+  setAsyncInfoSynchronous(AsyncInfo, ForceSynchronousTargetRegions);
   return RTL->data_submit_async(RTLDeviceID, TgtPtrBegin, HstPtrBegin, Size,
                                 AsyncInfo);
 }
@@ -199,19 +193,17 @@ int32_t DeviceTy::retrieveData(void *HstPtrBegin, void *TgtPtrBegin,
           RegionInterface.getCallbacks<ompt_target_data_transfer_from_device>(),
           DeviceID, TgtPtrBegin, omp_get_initial_device(), HstPtrBegin, Size,
           /*CodePtr=*/OMPT_GET_RETURN_ADDRESS);
-      // ToDo: mhalk Do we need a check for TracingActive here?
-      InterfaceRAII TargetDataRetrieveTraceRAII(
+      // Only if 'TracedDeviceId' is actually traced, AsyncInfo->OmptEventInfo
+      // is set and a trace record generated. Otherwise: No OMPT device tracing.
+      TracerInterfaceRAII TargetDataSubmitTraceRAII(
           RegionInterface
               .getTraceGenerators<ompt_target_data_transfer_from_device>(),
-          DeviceID, TgtPtrBegin, omp_get_initial_device(), HstPtrBegin, Size,
+          AsyncInfo, /*TracedDeviceId=*/DeviceID,
+          /*EventType=*/ompt_callback_target_data_op, DeviceID, TgtPtrBegin,
+          omp_get_initial_device(), HstPtrBegin, Size,
           /*CodePtr=*/OMPT_GET_RETURN_ADDRESS);)
 
-#ifdef OMPT_SUPPORT
-  if (ForceSynchronousTargetRegions || ompt::TracingActive)
-#else
-  if (ForceSynchronousTargetRegions)
-#endif
-    return RTL->data_retrieve(RTLDeviceID, HstPtrBegin, TgtPtrBegin, Size);
+  setAsyncInfoSynchronous(AsyncInfo, ForceSynchronousTargetRegions);
   return RTL->data_retrieve_async(RTLDeviceID, HstPtrBegin, TgtPtrBegin, Size,
                                   AsyncInfo);
 }
@@ -230,22 +222,17 @@ int32_t DeviceTy::dataExchange(void *SrcPtr, DeviceTy &DstDev, void *DstPtr,
           RegionInterface.getCallbacks<ompt_target_data_transfer_from_device>(),
           RTLDeviceID, SrcPtr, DstDev.RTLDeviceID, DstPtr, Size,
           /*CodePtr=*/OMPT_GET_RETURN_ADDRESS);
-      // ToDo: mhalk Do we need a check for TracingActive here?
-      InterfaceRAII TargetDataExchangeTraceRAII(
+      // Only if 'TracedDeviceId' is actually traced, AsyncInfo->OmptEventInfo
+      // is set and a trace record generated. Otherwise: No OMPT device tracing.
+      TracerInterfaceRAII TargetDataExchangeTraceRAII(
           RegionInterface
               .getTraceGenerators<ompt_target_data_transfer_from_device>(),
-          RTLDeviceID, SrcPtr, DstDev.RTLDeviceID, DstPtr, Size,
+          AsyncInfo, /*TracedDeviceId=*/RTLDeviceID,
+          /*EventType=*/ompt_callback_target_data_op, RTLDeviceID, SrcPtr,
+          DstDev.RTLDeviceID, DstPtr, Size,
           /*CodePtr=*/OMPT_GET_RETURN_ADDRESS);)
 
-#ifdef OMPT_SUPPORT
-  if (ForceSynchronousTargetRegions || !AsyncInfo || ompt::TracingActive) {
-#else
-  if (ForceSynchronousTargetRegions || !AsyncInfo) {
-#endif
-    assert(RTL->data_exchange && "RTL->data_exchange is nullptr");
-    return RTL->data_exchange(RTLDeviceID, SrcPtr, DstDev.RTLDeviceID, DstPtr,
-                              Size);
-  }
+  setAsyncInfoSynchronous(AsyncInfo, ForceSynchronousTargetRegions);
   return RTL->data_exchange_async(RTLDeviceID, SrcPtr, DstDev.RTLDeviceID,
                                   DstPtr, Size, AsyncInfo);
 }
@@ -275,13 +262,8 @@ int32_t DeviceTy::notifyDataUnmapped(void *HstPtr) {
 int32_t DeviceTy::launchKernel(void *TgtEntryPtr, void **TgtVarsPtr,
                                ptrdiff_t *TgtOffsets, KernelArgsTy &KernelArgs,
                                AsyncInfoTy &AsyncInfo) {
-  if (ForceSynchronousTargetRegions || !RTL->launch_kernel ||
-#ifdef OMPT_SUPPORT
-      ompt::TracingActive ||
-#endif
-      !RTL->synchronize)
-    return RTL->launch_kernel_sync(RTLDeviceID, TgtEntryPtr, TgtVarsPtr,
-                                   TgtOffsets, &KernelArgs);
+
+  setAsyncInfoSynchronous(AsyncInfo, ForceSynchronousTargetRegions);
   return RTL->launch_kernel(RTLDeviceID, TgtEntryPtr, TgtVarsPtr, TgtOffsets,
                             &KernelArgs, AsyncInfo);
 }
@@ -343,31 +325,30 @@ void DeviceTy::dumpOffloadEntries() {
 }
 
 bool DeviceTy::useAutoZeroCopy() {
-  // Automatic zero-copy only applies when unfiied shared memory is disabled.
   if (PM->getRequirements() & OMP_REQ_UNIFIED_SHARED_MEMORY)
     return false;
 
-  if (RTL->use_auto_zero_copy)
-    return RTL->use_auto_zero_copy(RTLDeviceID);
-  return false;
+  return RTL->use_auto_zero_copy(RTLDeviceID);
 }
 
-bool DeviceTy::checkIfAPU() {
-  if (RTL->has_apu_device)
-    return RTL->has_apu_device(RTLDeviceID);
-  return false;
-}
+bool DeviceTy::checkIfAPU() { return RTL->has_apu_device(RTLDeviceID); }
 
 bool DeviceTy::supportsUnifiedMemory() {
-  if (RTL->supports_unified_memory)
-    return RTL->supports_unified_memory(RTLDeviceID);
-  return false;
+  return RTL->supports_unified_memory(RTLDeviceID);
 }
 
 void DeviceTy::zeroCopySanityChecksAndDiag(bool isUnifiedSharedMemory,
                                            bool isAutoZeroCopy,
                                            bool isEagerMaps) {
-  if (RTL->zero_copy_sanity_checks_and_diag)
-    RTL->zero_copy_sanity_checks_and_diag(RTLDeviceID, isUnifiedSharedMemory,
-                                          isAutoZeroCopy, isEagerMaps);
+  RTL->zero_copy_sanity_checks_and_diag(RTLDeviceID, isUnifiedSharedMemory,
+                                        isAutoZeroCopy, isEagerMaps);
+}
+
+uint32_t DeviceTy::getNumMultiDevices() const {
+  return RTL->get_num_multi_devices(RTLDeviceID);
+}
+
+// Check if kernel is a multi device kernel
+bool DeviceTy::isMultiDeviceKernel(void *TgtEntryPtr) {
+  return RTL->kernel_is_multi_device(RTLDeviceID, TgtEntryPtr);
 }

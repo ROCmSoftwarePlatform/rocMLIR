@@ -53,6 +53,11 @@ void testFlat(amd_comgr_action_info_t ActionInfo, const char *Options) {
   Status = amd_comgr_action_info_get_options(ActionInfo, &Size, RetOptions);
   checkError(Status, "amd_comgr_action_info_get_options");
 
+  if (!RetOptions) {
+    printf("Failed, RetOptions NULL\n");
+    exit(0);
+  }
+
   if (strcmp(Options, RetOptions)) {
     fail("incorrect options string: expected '%s', saw '%s'", Options,
          RetOptions);
@@ -61,7 +66,7 @@ void testFlat(amd_comgr_action_info_t ActionInfo, const char *Options) {
   free(RetOptions);
 }
 
-void testFlats() {
+void testFlats(void) {
   amd_comgr_action_info_t ActionInfo;
   amd_comgr_status_t Status;
 
@@ -105,6 +110,12 @@ void testList(amd_comgr_action_info_t ActionInfo, const char *Options[],
     Status = amd_comgr_action_info_get_option_list_item(ActionInfo, I, &Size,
                                                         Option);
     checkError(Status, "amd_comgr_action_info_get_option_list_item");
+
+    if (!Options[I]) {
+      printf("Failed, Options[%ld] NULL\n", I);
+      exit(0);
+    }
+
     if (strcmp(Options[I], Option)) {
       fail("incorrect option string: expected '%s', saw '%s'", Options[I],
            Option);
@@ -113,7 +124,7 @@ void testList(amd_comgr_action_info_t ActionInfo, const char *Options[],
   }
 }
 
-void testLists() {
+void testLists(void) {
   amd_comgr_action_info_t ActionInfo;
   amd_comgr_status_t Status;
 
@@ -133,7 +144,7 @@ void testLists() {
   checkError(Status, "amd_comgr_destroy_action_info");
 }
 
-void testMixed() {
+void testMixed(void) {
   amd_comgr_action_info_t ActionInfo;
   amd_comgr_status_t Status;
   size_t Size;
@@ -188,7 +199,7 @@ void testMixed() {
   checkError(Status, "amd_comgr_destroy_action_info");
 }
 
-void testFlatSplitting() {
+void testFlatSplitting(void) {
   char *BufSource, *BufInclude;
   size_t SizeSource, SizeInclude;
   amd_comgr_data_t DataSource, DataInclude;

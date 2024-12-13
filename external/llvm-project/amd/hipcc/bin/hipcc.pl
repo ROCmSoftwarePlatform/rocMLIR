@@ -180,7 +180,6 @@ if ($HIP_PLATFORM eq "amd") {
     }
 } elsif ($HIP_PLATFORM eq "nvidia") {
     $CUDA_PATH=$ENV{'CUDA_PATH'} // '/usr/local/cuda';
-    $HIP_INCLUDE_PATH = "$HIP_PATH/include";
     if ($verbose & 0x2) {
         print ("CUDA_PATH=$CUDA_PATH\n");
     }
@@ -188,6 +187,7 @@ if ($HIP_PLATFORM eq "amd") {
     $HIPCC=get_normalized_path("$CUDA_PATH/bin/nvcc");
     $HIPCXXFLAGS .= " -Wno-deprecated-gpu-targets ";
     $HIPCXXFLAGS .= " -isystem " . get_normalized_path("$CUDA_PATH/include");
+    $HIPCXXFLAGS .= " -isystem " . get_normalized_path("$HIP_PATH/include");
     $HIPCFLAGS .= " -isystem " . get_normalized_path("$CUDA_PATH/include");
 
     $HIPLDFLAGS = " -Wno-deprecated-gpu-targets -lcuda -lcudart -L" . get_normalized_path("$CUDA_PATH/lib64");
@@ -267,6 +267,11 @@ foreach $arg (@ARGV)
     $trimarg =~ s/^\s+|\s+$//g;  # Remive whitespace
     my $swallowArg = 0;
     my $escapeArg = 1;
+    if ($HIP_PLATFORM eq "nvidia") {
+        if (($trimarg =~ /--rocm-path/) or ($trimarg =~ /--hip-path/)) {
+            next;
+        }
+    }
     if ($arg eq '-c' or $arg eq '--genco' or $arg eq '-E') {
         $compileOnly = 1;
         $needLDFLAGS  = 0;
@@ -563,14 +568,6 @@ if ($HIP_PLATFORM eq "amd") {
     }
 }
 
-if ($HIPCC_COMPILE_FLAGS_APPEND) {
-    $HIPCXXFLAGS .= " $HIPCC_COMPILE_FLAGS_APPEND";
-    $HIPCFLAGS .= " $HIPCC_COMPILE_FLAGS_APPEND";
-}
-if ($HIPCC_LINK_FLAGS_APPEND) {
-    $HIPLDFLAGS .= " $HIPCC_LINK_FLAGS_APPEND";
-}
-
 # TODO: convert CMD to an array rather than a string
 my $CMD="$HIPCC";
 
@@ -586,6 +583,14 @@ if ($needLDFLAGS and not $compileOnly) {
     $CMD .= " $HIPLDFLAGS";
 }
 $CMD .= " $toolArgs";
+
+if (($needCFLAGS or $needCXXFLAGS) and $HIPCC_COMPILE_FLAGS_APPEND) {
+    $CMD .= " $HIPCC_COMPILE_FLAGS_APPEND";
+}
+
+if ($needLDFLAGS and not $compileOnly and $HIPCC_LINK_FLAGS_APPEND) {
+    $CMD .= " $HIPCC_LINK_FLAGS_APPEND";
+}
 
 if ($verbose & 0x1) {
     print "hipcc-cmd: ", $CMD, "\n";

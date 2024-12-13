@@ -12,11 +12,6 @@
 
 #ifndef OMPT_SUPPORT
 
-#include "Shared/Debug.h"
-#include "omp-tools.h"
-#include "private.h"
-
-#include "llvm/Support/DynamicLibrary.h"
 extern "C" {
 /// Dummy definition when OMPT is disabled
 void ompt_libomptarget_connect() {}
@@ -343,6 +338,63 @@ void Interface::endTargetUpdate(int64_t DeviceId, void *Code) {
                             TaskData, TargetData.value, Code);
   }
   endTargetRegion();
+}
+
+void Interface::beginTargetAssociatePointer(int64_t DeviceId, void *HstPtrBegin,
+                                            void *TgtPtrBegin, size_t Size,
+                                            void *Code) {
+  beginTargetDataOperation();
+  if (ompt_callback_target_data_op_emi_fn) {
+    ompt_callback_target_data_op_emi_fn(
+        ompt_scope_begin, TargetTaskData, &TargetData, &HostOpId,
+        ompt_target_data_associate, HstPtrBegin, omp_get_initial_device(),
+        TgtPtrBegin, DeviceId, Size, Code);
+  } else if (ompt_callback_target_data_op_fn) {
+    HostOpId = createOpId();
+    ompt_callback_target_data_op_fn(
+        TargetData.value, HostOpId, ompt_target_data_associate, HstPtrBegin,
+        omp_get_initial_device(), TgtPtrBegin, DeviceId, Size, Code);
+  }
+}
+
+void Interface::endTargetAssociatePointer(int64_t DeviceId, void *HstPtrBegin,
+                                          void *TgtPtrBegin, size_t Size,
+                                          void *Code) {
+  if (ompt_callback_target_data_op_emi_fn) {
+    ompt_callback_target_data_op_emi_fn(
+        ompt_scope_end, TargetTaskData, &TargetData, &HostOpId,
+        ompt_target_data_associate, HstPtrBegin, omp_get_initial_device(),
+        TgtPtrBegin, DeviceId, Size, Code);
+  }
+}
+
+void Interface::beginTargetDisassociatePointer(int64_t DeviceId,
+                                               void *HstPtrBegin,
+                                               void *TgtPtrBegin, size_t Size,
+                                               void *Code) {
+  beginTargetDataOperation();
+  if (ompt_callback_target_data_op_emi_fn) {
+    ompt_callback_target_data_op_emi_fn(
+        ompt_scope_begin, TargetTaskData, &TargetData, &HostOpId,
+        ompt_target_data_disassociate, HstPtrBegin, omp_get_initial_device(),
+        TgtPtrBegin, DeviceId, Size, Code);
+  } else if (ompt_callback_target_data_op_fn) {
+    HostOpId = createOpId();
+    ompt_callback_target_data_op_fn(
+        TargetData.value, HostOpId, ompt_target_data_disassociate, HstPtrBegin,
+        omp_get_initial_device(), TgtPtrBegin, DeviceId, Size, Code);
+  }
+}
+void Interface::endTargetDisassociatePointer(int64_t DeviceId,
+                                             void *HstPtrBegin,
+                                             void *TgtPtrBegin, size_t Size,
+                                             void *Code) {
+  if (ompt_callback_target_data_op_emi_fn) {
+    ompt_callback_target_data_op_emi_fn(
+        ompt_scope_end, TargetTaskData, &TargetData, &HostOpId,
+        ompt_target_data_disassociate, HstPtrBegin, omp_get_initial_device(),
+        TgtPtrBegin, DeviceId, Size, Code);
+  }
 }
 
 void Interface::beginTarget(int64_t DeviceId, void *Code) {

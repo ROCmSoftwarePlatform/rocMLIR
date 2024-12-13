@@ -103,14 +103,14 @@ struct ThreadwiseGemmRewritePattern
     Value gemmA = adaptor.getMatrixA();
     Value gemmB = adaptor.getMatrixB();
     Value gemmC = adaptor.getMatrixC();
-    auto gemmAType = gemmA.getType().cast<MemRefType>();
+    auto gemmAType = cast<MemRefType>(gemmA.getType());
     Type dataType = gemmAType.getElementType();
 
     ArrayRef<int64_t> aShape = gemmAType.getShape();
     int64_t k = aShape[0];
     int64_t m = aShape[1];
     int64_t kPack = aShape[2];
-    int64_t n = gemmB.getType().cast<MemRefType>().getShape()[1];
+    int64_t n = cast<MemRefType>(gemmB.getType()).getShape()[1];
     // Note for future: when we use dot products, we should increase this to
     // the number of elements supported by the relevant dot product.
     int64_t loadKpackLen = 1;
@@ -177,14 +177,14 @@ struct ThreadwiseGemmRewritePattern
 
       Value cVector = b.create<vector::SplatOp>(loc, abType, cVal);
       Value result;
-      if (dataType.isa<IntegerType>()) {
+      if (isa<IntegerType>(dataType)) {
         Value mul = b.create<MulIOp>(loc, aVal, bVal);
         result = b.create<AddIOp>(loc, mul, cVector);
         if (abType.getNumElements() != 1)
           return op.emitOpError(
               "Shouldn't've gone down the scalar code path (int)");
         result = b.create<vector::ExtractElementOp>(loc, result, zeroConst);
-      } else if (dataType.isa<FloatType>()) {
+      } else if (isa<FloatType>(dataType)) {
         result = b.create<vector::FMAOp>(loc, aVal, bVal, cVector);
         if (abType.getNumElements() != 1)
           return op.emitOpError(
@@ -237,14 +237,14 @@ struct ThreadwiseAccelGemmRewritePattern
     RockAccelTuningParamAttrInterface tuningParams = op.getParams();
 
     auto dataTypeA =
-        adaptor.getMatrixA().getType().cast<MemRefType>().getElementType();
+        cast<MemRefType>(adaptor.getMatrixA().getType()).getElementType();
     auto dataTypeB =
-        adaptor.getMatrixB().getType().cast<MemRefType>().getElementType();
-    if (dataTypeA.isa<VectorType>()) {
-      dataTypeA = dataTypeA.cast<VectorType>().getElementType();
+        cast<MemRefType>(adaptor.getMatrixB().getType()).getElementType();
+    if (isa<VectorType>(dataTypeA)) {
+      dataTypeA = cast<VectorType>(dataTypeA).getElementType();
     }
-    if (dataTypeB.isa<VectorType>()) {
-      dataTypeB = dataTypeB.cast<VectorType>().getElementType();
+    if (isa<VectorType>(dataTypeB)) {
+      dataTypeB = cast<VectorType>(dataTypeB).getElementType();
     }
 
     Value bufferA = adaptor.getMatrixA();
@@ -363,7 +363,7 @@ LogicalResult ThreadwiseCopyRewritePattern::matchAndRewrite(
   destView = isolateTransforms(b, destView);
 
   Value zero = b.createOrFold<arith::ConstantIndexOp>(loc, 0);
-  Type elemType = sourceView.getType().cast<MemRefType>().getElementType();
+  Type elemType = cast<MemRefType>(sourceView.getType()).getElementType();
 
   auto [rawLoadBuffer, loadBufferView, sourceNeeds64BitIdx] =
       untransform(b, sourceView);
@@ -373,9 +373,9 @@ LogicalResult ThreadwiseCopyRewritePattern::matchAndRewrite(
   assert(!sourceNeeds64BitIdx && "Registers shouldn't need 64-bit indexing");
   assert(!dstNeeds64BitIdx && "Registers shouldn't need 64-bit indexing");
   ArrayRef<int64_t> rawLoadBufferShape =
-      rawLoadBuffer.getType().cast<ShapedType>().getShape();
+      cast<ShapedType>(rawLoadBuffer.getType()).getShape();
   ArrayRef<int64_t> rawStoreBufferShape =
-      rawStoreBuffer.getType().cast<ShapedType>().getShape();
+      cast<ShapedType>(rawStoreBuffer.getType()).getShape();
   if (rawLoadBufferShape.size() > extraIndicesSourceSize + 1)
     return op.emitOpError("Raw load buffers have to be flat or multi buffers.");
   if (rawStoreBufferShape.size() > extraIndicesDestSize + 1)
@@ -491,12 +491,12 @@ LogicalResult ThreadwiseReadIntoRewritePattern::matchAndRewrite(
   sourceView = isolateTransforms(b, sourceView);
   auto sourceViewType = cast<MemRefType>(sourceView.getType());
   Value dest = adaptor.getDest();
-  MemRefType dstBufferType = dest.getType().cast<MemRefType>();
+  MemRefType dstBufferType = cast<MemRefType>(dest.getType());
 
   int64_t numValues = dstBufferType.getNumElements();
 
-  bool isSrcVectorBuffer = sourceViewType.getElementType().isa<VectorType>();
-  bool isDstVectorBuffer = dstBufferType.getElementType().isa<VectorType>();
+  bool isSrcVectorBuffer = isa<VectorType>(sourceViewType.getElementType());
+  bool isDstVectorBuffer = isa<VectorType>(dstBufferType.getElementType());
 
   size_t extraIdxCount = op.getExtraIndices().size();
   // We are vectorizing in the iter dimension, not block ID or thread ID
@@ -508,8 +508,8 @@ LogicalResult ThreadwiseReadIntoRewritePattern::matchAndRewrite(
 
   if (isSrcVectorBuffer) {
     loadType = elementType;
-    vectorSrcLen = elementType.dyn_cast<VectorType>().getNumElements();
-    elementType = elementType.dyn_cast<VectorType>().getElementType();
+    vectorSrcLen = dyn_cast<VectorType>(elementType).getNumElements();
+    elementType = dyn_cast<VectorType>(elementType).getElementType();
     collapseContiguousMerges(sourceView);
     srcStride = 1;
     if (!isDstVectorBuffer) {
@@ -525,9 +525,16 @@ LogicalResult ThreadwiseReadIntoRewritePattern::matchAndRewrite(
     loadType = vectorTypeOrSelf(elementType, vectorSrcLen);
   }
 
+  // Force the dynamic validity case down to a vectorization of 1
+  if (!adaptor.getDynamicValidities().empty()) {
+    vectorSrcLen = 1;
+    srcStride = 1;
+    loadType = elementType;
+  }
+
   if (isDstVectorBuffer) {
-    dstVectorType = dstBufferType.getElementType().dyn_cast<VectorType>();
-    vectorDstLen = dstVectorType.dyn_cast<VectorType>().getNumElements();
+    dstVectorType = dyn_cast<VectorType>(dstBufferType.getElementType());
+    vectorDstLen = dyn_cast<VectorType>(dstVectorType).getNumElements();
     numValues = numValues * vectorDstLen;
     if (isSrcVectorBuffer) {
       numValues = numValues / vectorSrcLen;
@@ -540,7 +547,7 @@ LogicalResult ThreadwiseReadIntoRewritePattern::matchAndRewrite(
   gpu::AddressSpace srcAddrSpace = gpu::AddressSpace::Global;
   if (srcBufferType.getMemorySpace()) {
     srcAddrSpace =
-        srcBufferType.getMemorySpace().cast<gpu::AddressSpaceAttr>().getValue();
+        cast<gpu::AddressSpaceAttr>(srcBufferType.getMemorySpace()).getValue();
   }
 
   LLVM_DEBUG(llvm::dbgs() << "Max vectorization for read_into = "
@@ -561,27 +568,58 @@ LogicalResult ThreadwiseReadIntoRewritePattern::matchAndRewrite(
 
   SmallVector<Attribute> transformAttrs;
 
+  bool recordsValidity =
+      op.getValidityRecord() && !op.getValidityRecord().use_empty();
+  Value validityInit = nullptr;
+  if (recordsValidity) {
+    Value trueConst = b.createOrFold<arith::ConstantIntOp>(loc, true, 1);
+    validityInit = b.create<vector::SplatOp>(
+        loc, op.getValidityRecord().getType(), trueConst);
+  }
   auto loadLoop = b.create<TransformingForOp>(
       loc, ArrayRef<ValueRange>{readStartCoords, readStartCoords},
       ArrayRef<Attribute>{transforms, b.getArrayAttr({})}, bounds, strides,
-      forceUnroll, useIndexDiffs);
+      forceUnroll, useIndexDiffs,
+      recordsValidity ? ValueRange{validityInit} : std::nullopt);
   {
     OpBuilder::InsertionGuard guard(b);
     b.setInsertionPointToStart(loadLoop.getBody());
+    Value validity = loadLoop.getValidity(/*domain=*/0);
+    Value destIndex = loadLoop.getLowerCoords(/*domain=*/1)[extraIdxCount];
+
+    for (Value dynamicValidity : adaptor.getDynamicValidities()) {
+      Value validityHere = b.create<vector::ExtractOp>(
+          loc, b.getI1Type(), dynamicValidity, destIndex,
+          ArrayRef<int64_t>{ShapedType::kDynamic});
+      validity =
+          b.create<arith::AndIOp>(loc, b.getI1Type(), validity, validityHere);
+    }
+    Value nextValidityRecord = nullptr;
+    if (recordsValidity) {
+      Value validityToStore = validity;
+      Type validityType = b.getI1Type();
+      if (auto loadVecType = dyn_cast<VectorType>(loadType)) {
+        validityType = loadVecType.cloneWith(std::nullopt, validityType);
+        validityToStore =
+            b.createOrFold<vector::SplatOp>(loc, validityType, validityToStore);
+      }
+      Value validityRecord = loadLoop.getIterArgs()[0];
+      nextValidityRecord =
+          b.create<InsertSliceOp>(loc, validityRecord.getType(),
+                                  validityToStore, validityRecord, destIndex);
+    }
+
     if (srcAddrSpace == gpu::AddressSpace::Global) {
       Value loaded = b.create<GlobalLoadOp>(
-          loc, loadType, buffer, loadLoop.getValidity(/*domain=*/0),
+          loc, loadType, buffer, validity,
           loadLoop.getLowerCoords(/*domain=*/0), needs64BitIdx);
-      b.create<InBoundsStoreOp>(loc, loaded, dest,
-                                loadLoop.getLowerCoords(
-                                    /*domain=*/1)[extraIdxCount]);
+      b.create<InBoundsStoreOp>(loc, loaded, dest, destIndex);
     } else {
       if (needs64BitIdx)
         return b.notifyMatchFailure(
             loc, "non-global address spaces must have 32-bit pointers");
-      TypedValue<IntegerType> valid = loadLoop.getValidity(/*domain=*/0);
       scf::IfOp ifb =
-          b.create<scf::IfOp>(loc, loadType, valid, /*withElseRegion=*/true);
+          b.create<scf::IfOp>(loc, loadType, validity, /*withElseRegion=*/true);
       {
         OpBuilder thenb = ifb.getThenBodyBuilder();
         Value loaded;
@@ -599,13 +637,12 @@ LogicalResult ThreadwiseReadIntoRewritePattern::matchAndRewrite(
         elseb.create<scf::YieldOp>(loc, zeroVal);
       }
 
-      Value destOffset = loadLoop.getLowerCoords(1)[extraIdxCount];
       if (!isDstVectorBuffer && !isSrcVectorBuffer) {
-        b.create<InBoundsStoreOp>(loc, ifb.getResult(0), dest, destOffset);
+        b.create<InBoundsStoreOp>(loc, ifb.getResult(0), dest, destIndex);
       } else if (!isDstVectorBuffer && isSrcVectorBuffer) {
-        destOffset = b.create<arith::MulIOp>(
-            loc, destOffset, b.create<ConstantIndexOp>(loc, vectorSrcLen));
-        b.create<InBoundsStoreOp>(loc, ifb.getResult(0), dest, destOffset);
+        destIndex = b.create<arith::MulIOp>(
+            loc, destIndex, b.create<ConstantIndexOp>(loc, vectorSrcLen));
+        b.create<InBoundsStoreOp>(loc, ifb.getResult(0), dest, destIndex);
       } else {
         // Destination is a vector buffer
         Value idx = loadLoop.getLowerCoords(/*domain=*/1)[extraIdxCount];
@@ -663,8 +700,14 @@ LogicalResult ThreadwiseReadIntoRewritePattern::matchAndRewrite(
         }
       }
     }
+    if (recordsValidity)
+      b.create<rock::YieldOp>(loc, nextValidityRecord);
   }
-  b.eraseOp(op);
+  // Special case: we planned to record validity, but no one cared
+  if (op.getValidityRecord() && !recordsValidity)
+    b.replaceOp(op, ValueRange{Value{}});
+  else
+    b.replaceOp(op, loadLoop.getResults());
   return success();
 }
 
@@ -695,7 +738,7 @@ LogicalResult ThreadwiseWriteAllRewritePattern::matchAndRewrite(
   // doing so. Therefore, don't bother. This currently implicitly assumes
   // a scalarized view on top of the destination buffer, which'll be cleaned up
   // in the future.
-  if (auto elemVecType = destElemType.dyn_cast<VectorType>()) {
+  if (auto elemVecType = dyn_cast<VectorType>(destElemType)) {
     vectorLen = elemVecType.getNumElements();
     elementType = elemVecType.getElementType();
   } else {
@@ -708,13 +751,13 @@ LogicalResult ThreadwiseWriteAllRewritePattern::matchAndRewrite(
 
   collapseContiguousMerges(destView);
   auto [buffer, transforms, needs64BitIdx] = untransform(b, destView);
-  MemRefType dstBufferType = buffer.getType().cast<MemRefType>();
+  MemRefType dstBufferType = cast<MemRefType>(buffer.getType());
 
   // Unless specified it is assumed to be global
   gpu::AddressSpace dstAddrSpace = gpu::AddressSpace::Global;
   if (dstBufferType.getMemorySpace()) {
     dstAddrSpace =
-        dstBufferType.getMemorySpace().cast<gpu::AddressSpaceAttr>().getValue();
+        cast<gpu::AddressSpaceAttr>(dstBufferType.getMemorySpace()).getValue();
   }
 
   bool forceUnroll = op.getForceUnroll();
@@ -753,7 +796,7 @@ LogicalResult ThreadwiseWriteAllRewritePattern::matchAndRewrite(
         return b.notifyMatchFailure(
             loc, "non-global address spaces must have 32-bit pointers");
       Type loadType = vectorTypeOrSelf(elementType, vectorLen);
-      TypedValue<IntegerType> valid = outLoop.getValidity(/*domain=*/0);
+      TypedValue<IntegerType> valid = outLoop.getValidity(/*domain=*/1);
       scf::IfOp ifb = b.create<scf::IfOp>(loc, valid, /*withElseRegion=*/false);
       {
         OpBuilder thenb = ifb.getThenBodyBuilder();
@@ -761,7 +804,7 @@ LogicalResult ThreadwiseWriteAllRewritePattern::matchAndRewrite(
             thenb.create<InBoundsLoadOp>(loc, loadType, source,
                                          outLoop.getLowerCoords(
                                              /*domain=*/0)[extraIdxCount]);
-        if (!destElemType.isa<VectorType>()) {
+        if (!isa<VectorType>(destElemType)) {
           thenb.create<InBoundsStoreOp>(loc, loaded, buffer,
                                         outLoop.getLowerCoords(/*domain=*/1));
         } else {

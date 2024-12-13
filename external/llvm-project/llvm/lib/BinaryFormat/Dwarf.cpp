@@ -139,7 +139,7 @@ StringRef llvm::dwarf::OperationEncodingString(unsigned Encoding) {
   switch (Encoding) {
   default:
     return StringRef();
-#define HANDLE_DW_OP(ID, NAME, VERSION, VENDOR)                                \
+#define HANDLE_DW_OP(ID, NAME, OPERANDS, ARITY, VERSION, VENDOR)               \
   case DW_OP_##NAME:                                                           \
     return "DW_OP_" #NAME;
 #include "llvm/BinaryFormat/Dwarf.def"
@@ -155,12 +155,18 @@ StringRef llvm::dwarf::OperationEncodingString(unsigned Encoding) {
     return "DW_OP_LLVM_implicit_pointer";
   case DW_OP_LLVM_arg:
     return "DW_OP_LLVM_arg";
+  case DW_OP_LLVM_extract_bits_sext:
+    return "DW_OP_LLVM_extract_bits_sext";
+  case DW_OP_LLVM_extract_bits_zext:
+    return "DW_OP_LLVM_extract_bits_zext";
+  case DW_OP_LLVM_poisoned:
+    return "DW_OP_LLVM_poisoned";
   }
 }
 
 unsigned llvm::dwarf::getOperationEncoding(StringRef OperationEncodingString) {
   return StringSwitch<unsigned>(OperationEncodingString)
-#define HANDLE_DW_OP(ID, NAME, VERSION, VENDOR)                                \
+#define HANDLE_DW_OP(ID, NAME, OPERANDS, ARITY, VERSION, VENDOR)               \
   .Case("DW_OP_" #NAME, DW_OP_##NAME)
 #include "llvm/BinaryFormat/Dwarf.def"
       .Case("DW_OP_LLVM_convert", DW_OP_LLVM_convert)
@@ -169,6 +175,9 @@ unsigned llvm::dwarf::getOperationEncoding(StringRef OperationEncodingString) {
       .Case("DW_OP_LLVM_entry_value", DW_OP_LLVM_entry_value)
       .Case("DW_OP_LLVM_implicit_pointer", DW_OP_LLVM_implicit_pointer)
       .Case("DW_OP_LLVM_arg", DW_OP_LLVM_arg)
+      .Case("DW_OP_LLVM_extract_bits_sext", DW_OP_LLVM_extract_bits_sext)
+      .Case("DW_OP_LLVM_extract_bits_zext", DW_OP_LLVM_extract_bits_zext)
+      .Case("DW_OP_LLVM_poisoned", DW_OP_LLVM_poisoned)
       .Default(0);
 }
 
@@ -210,9 +219,35 @@ unsigned llvm::dwarf::OperationVersion(dwarf::LocationAtom Op) {
   switch (Op) {
   default:
     return 0;
-#define HANDLE_DW_OP(ID, NAME, VERSION, VENDOR)                                \
+#define HANDLE_DW_OP(ID, NAME, OPERANDS, ARITY, VERSION, VENDOR)               \
   case DW_OP_##NAME:                                                           \
     return VERSION;
+#include "llvm/BinaryFormat/Dwarf.def"
+  }
+}
+
+std::optional<unsigned> llvm::dwarf::OperationOperands(dwarf::LocationAtom Op) {
+  switch (Op) {
+  default:
+    return std::nullopt;
+#define HANDLE_DW_OP(ID, NAME, OPERANDS, ARITY, VERSION, VENDOR)               \
+  case DW_OP_##NAME:                                                           \
+    if (OPERANDS == -1)                                                        \
+      return std::nullopt;                                                     \
+    return OPERANDS;
+#include "llvm/BinaryFormat/Dwarf.def"
+  }
+}
+
+std::optional<unsigned> llvm::dwarf::OperationArity(dwarf::LocationAtom Op) {
+  switch (Op) {
+  default:
+    return std::nullopt;
+#define HANDLE_DW_OP(ID, NAME, OPERANDS, ARITY, VERSION, VENDOR)               \
+  case DW_OP_##NAME:                                                           \
+    if (ARITY == -1)                                                           \
+      return std::nullopt;                                                     \
+    return ARITY;
 #include "llvm/BinaryFormat/Dwarf.def"
   }
 }
@@ -221,7 +256,7 @@ unsigned llvm::dwarf::OperationVendor(dwarf::LocationAtom Op) {
   switch (Op) {
   default:
     return 0;
-#define HANDLE_DW_OP(ID, NAME, VERSION, VENDOR)                                \
+#define HANDLE_DW_OP(ID, NAME, OPERANDS, ARITY, VERSION, VENDOR)               \
   case DW_OP_##NAME:                                                           \
     return DWARF_VENDOR_##VENDOR;
 #include "llvm/BinaryFormat/Dwarf.def"
@@ -409,6 +444,16 @@ llvm::dwarf::LanguageLowerBound(dwarf::SourceLanguage Lang) {
     return LOWER_BOUND;
 #include "llvm/BinaryFormat/Dwarf.def"
   }
+}
+
+StringRef llvm::dwarf::LanguageDescription(dwarf::SourceLanguageName lname) {
+  switch (lname) {
+#define HANDLE_DW_LNAME(ID, NAME, DESC, LOWER_BOUND)                           \
+  case DW_LNAME_##NAME:                                                        \
+    return DESC;
+#include "llvm/BinaryFormat/Dwarf.def"
+  }
+  return "Unknown";
 }
 
 StringRef llvm::dwarf::CaseString(unsigned Case) {

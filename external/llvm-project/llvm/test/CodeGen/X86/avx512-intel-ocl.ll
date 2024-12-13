@@ -8,7 +8,7 @@
 ; RUN: llc < %s -mtriple=x86_64-apple-darwin -mcpu=knl | FileCheck %s -check-prefixes=X64,X64-KNL
 ; RUN: llc < %s -mtriple=x86_64-apple-darwin -mcpu=skx | FileCheck %s -check-prefixes=X64,X64-SKX
 
-declare <16 x float> @func_float16_ptr(<16 x float>, <16 x float> *)
+declare <16 x float> @func_float16_ptr(<16 x float>, ptr)
 declare <16 x float> @func_float16(<16 x float>, <16 x float>)
 declare i32 @func_int(i32, i32)
 
@@ -70,7 +70,11 @@ define <16 x float> @testf16_inp(<16 x float> %a, <16 x float> %b) nounwind {
 ; X64-NEXT:    subq $128, %rsp
 ; X64-NEXT:    vaddps %zmm1, %zmm0, %zmm0
 ; X64-NEXT:    movq %rsp, %rdi
+; X64-NEXT:    pushq %rbp
+; X64-NEXT:    pushq %rax
 ; X64-NEXT:    callq _func_float16_ptr
+; X64-NEXT:    addq $8, %rsp
+; X64-NEXT:    popq %rbp
 ; X64-NEXT:    vaddps (%rsp), %zmm0, %zmm0
 ; X64-NEXT:    leaq -16(%rbp), %rsp
 ; X64-NEXT:    popq %r12
@@ -79,8 +83,8 @@ define <16 x float> @testf16_inp(<16 x float> %a, <16 x float> %b) nounwind {
 ; X64-NEXT:    retq
   %y = alloca <16 x float>, align 64
   %x = fadd <16 x float> %a, %b
-  %1 = call intel_ocl_bicc <16 x float> @func_float16_ptr(<16 x float> %x, <16 x float>* %y)
-  %2 = load <16 x float>, <16 x float>* %y, align 16
+  %1 = call intel_ocl_bicc <16 x float> @func_float16_ptr(<16 x float> %x, ptr %y)
+  %2 = load <16 x float>, ptr %y, align 16
   %3 = fadd <16 x float> %2, %1
   ret <16 x float> %3
 }
@@ -150,7 +154,11 @@ define <16 x float> @testf16_regs(<16 x float> %a, <16 x float> %b) nounwind {
 ; X64-NEXT:    vmovaps %zmm1, %zmm16
 ; X64-NEXT:    vaddps %zmm1, %zmm0, %zmm0
 ; X64-NEXT:    movq %rsp, %rdi
+; X64-NEXT:    pushq %rbp
+; X64-NEXT:    pushq %rax
 ; X64-NEXT:    callq _func_float16_ptr
+; X64-NEXT:    addq $8, %rsp
+; X64-NEXT:    popq %rbp
 ; X64-NEXT:    vaddps %zmm16, %zmm0, %zmm0
 ; X64-NEXT:    vaddps (%rsp), %zmm0, %zmm0
 ; X64-NEXT:    leaq -16(%rbp), %rsp
@@ -160,8 +168,8 @@ define <16 x float> @testf16_regs(<16 x float> %a, <16 x float> %b) nounwind {
 ; X64-NEXT:    retq
   %y = alloca <16 x float>, align 64
   %x = fadd <16 x float> %a, %b
-  %1 = call intel_ocl_bicc <16 x float> @func_float16_ptr(<16 x float> %x, <16 x float>* %y)
-  %2 = load <16 x float>, <16 x float>* %y, align 16
+  %1 = call intel_ocl_bicc <16 x float> @func_float16_ptr(<16 x float> %x, ptr %y)
+  %2 = load <16 x float>, ptr %y, align 16
   %3 = fadd <16 x float> %1, %b
   %4 = fadd <16 x float> %2, %3
   ret <16 x float> %4

@@ -13,7 +13,7 @@
 #ifndef OPENMP_LIBOMPTARGET_DEVICERTL_INCLUDE_EXTRA_ALLOCATORS_H
 #define OPENMP_LIBOMPTARGET_DEVICERTL_INCLUDE_EXTRA_ALLOCATORS_H
 
-#include "Types.h"
+#include "DeviceTypes.h"
 #include "Xteamr.h"
 
 extern "C" {
@@ -88,11 +88,6 @@ void __kmpc_flush_acqrel(IdentTy *Loc);
 void *__kmpc_task_allow_completion_event(IdentTy *loc_ref, uint32_t gtid,
                                          TaskDescriptorTy *task);
 ///}
-
-/// __init_ThreadDSTPtrPtr is defined in Workshare.cpp to initialize
-/// the static LDS global variable ThreadDSTPtrPtr to 0.
-/// It is called in Kernel.cpp at the end of initializeRuntime().
-void __init_ThreadDSTPtrPtr();
 } // extern "C"
 
 /// Extra API exposed by ROCm

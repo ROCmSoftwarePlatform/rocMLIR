@@ -8,6 +8,7 @@ add_rocmlir_dialect_library(MLIRRockTransforms
   CheckResidency.cpp
   CleanMath.cpp
   ConvToGemm.cpp
+  EmulateNarrowType.cpp
   FoldBroadcast.cpp
   GemmToGridwise.cpp
   RockMultibuffer.cpp
@@ -23,6 +24,9 @@ add_rocmlir_dialect_library(MLIRRockTransforms
   LowerRockReduce.cpp
   RockPrepareLLVM.cpp
   VectorizeFusions.cpp
+  OutputSwizzle.cpp
+  ReuseLDS.cpp
+  ShuffleGemmForReductions.cpp
 
   ADDITIONAL_HEADER_DIRS
   ${MLIR_MAIN_INCLUDE_DIR}/mlir/Dialect/Rock
@@ -30,6 +34,8 @@ add_rocmlir_dialect_library(MLIRRockTransforms
   DEPENDS
   MLIRRockOpsIncGen
   MLIRRockPassIncGen
+  MLIRConversionPassIncGen
+  RocMLIRConversionPassIncGen
 
   LINK_LIBS PUBLIC
   MLIRAffineTransforms
@@ -55,5 +61,7 @@ add_rocmlir_dialect_library(MLIRRockTransforms
   MLIRSCFToControlFlow
   MLIRSupport
   MLIRTosaDialect
+  MLIRVectorTransforms
   MLIRMHAL
+  MLIRMHALTransforms
 )

@@ -11,6 +11,7 @@
 #include "mlir/Dialect/Rock/IR/Rock.h"
 #include "mlir/Dialect/Rock/IR/TransformMapBuilder.h"
 #include "mlir/Dialect/Utils/ReshapeOpsUtils.h"
+#include "llvm/ADT/StringSet.h"
 
 namespace mlir {
 class AffineMap;
@@ -197,6 +198,22 @@ TransformMapAttr transformExtractSlice(OpBuilder &b, Location loc,
                                        ArrayRef<int64_t> offsets,
                                        ArrayRef<int64_t> sizes);
 
+/// Restore the logical shapes of the arguments to `func`, which were flattened
+/// to 1-D memrefs to improve indexing performance. The logical types in
+/// question are given in `logicalTypes`. `builder` should be placed at the
+/// front of `func`, and its insertion point will be updated after the function
+/// returns. The names of the logical dimensions for each argument will be taken
+/// from `names`, and the corresponding values will be placed in `expandedArgs`.
+///
+/// This is done to improve indexing performance, especially in cases where
+/// buffer loads are used, so that, for example, we don't have to mask all the
+/// non-final coordinates to 0 before feeding the index into the N-D row-major
+/// indexing map that's implicit with `memref`.
+void expandFlatFunctionArguments(OpBuilder &b, func::FuncOp func,
+                                 ArrayRef<SmallVector<StringRef>> names,
+                                 TypeRange logicalTypes,
+                                 SmallVectorImpl<Value> &expanded);
+
 // If the condition is satified, rotate the dimension `d` by `k` using
 // `d = (d+k*stride) % len(d)`
 rock::TopDownTMBuilder
@@ -230,12 +247,47 @@ Value addPassThroughIndices(OpBuilder &b, Value transformed,
 
 ArrayRef<int64_t> getLowerShape(ArrayAttr transformStack);
 
+// Given a sequence of transform maps, this will remove the specified upper
+// dimensions. This is usually used to obtain intra-tile indexing in the
+// resultant tile where the remaining upper dims correspond to.
+// NOTE: if there is padding involved in a dimension that is partially
+// being removed, that padding will be ignored in the sub tile indexing
+// maps because the sub tile is assumed to fully materialized filled
+// padded data.
 FailureOr<ArrayAttr> removeUpperDims(OpBuilder &b, ArrayAttr transformAttrs,
                                      SetVector<int64_t> removeIndicesSet);
 
-FailureOr<ArrayAttr>
-removeUpperDims(OpBuilder &b, ArrayAttr transformAttrs,
-                const SetVector<StringRef> &removeDimNamesSet);
+// Given a sequence of transform maps, this will remove the specified upper
+// dimensions. This is usually used to obtain intra-tile indexing in the
+// resultant tile where the remaining upper dims correspond to.
+// NOTE: if there is padding involved in a dimension that is partially
+// being removed, that padding will be ignored in the sub tile indexing
+// maps because the sub tile is assumed to fully materialized filled
+// padded data.
+FailureOr<ArrayAttr> removeUpperDims(OpBuilder &b, ArrayAttr transformAttrs,
+                                     const StringSet<> &removeDimNamesSet);
+
+struct SubDimInfo {
+  int64_t size;
+  int64_t stride;
+};
+
+inline raw_ostream &operator<<(raw_ostream &os, const SubDimInfo &sdInfo) {
+  os << "<size: " << sdInfo.size << ",stride=" << sdInfo.stride << ">";
+  return os;
+}
+
+// Given a sequence of transform maps, this will obtain the lower sub-dimensions
+// each provided upper dim would map to.
+FailureOr<llvm::SmallDenseMap<int64_t, SmallVector<SubDimInfo>>>
+getLowerSubDimensions(OpBuilder &b, ArrayAttr transformAttrs, int64_t dim);
+FailureOr<llvm::SmallDenseMap<int64_t, SmallVector<SubDimInfo>>>
+getLowerSubDimensions(OpBuilder &b, ArrayAttr transformAttrs,
+                      ArrayRef<int64_t> dims);
+
+SmallVector<SmallString<8>> createDimNames(int64_t len, StringRef prefix);
+SmallVector<StringRef> getStringRefsFor(ArrayRef<SmallString<8>> strings);
+
 } // end namespace rock
 } // end namespace mlir
 #endif

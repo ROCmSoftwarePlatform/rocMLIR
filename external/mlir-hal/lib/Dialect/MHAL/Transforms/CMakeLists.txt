@@ -1,6 +1,9 @@
 add_mlir_dialect_library(MLIRMHALTransforms
+  AnnotateAccessKinds.cpp
   Bufferize.cpp
   BufferizableOpInterfaceImpl.cpp
+  DropMetadata.cpp
+  EmulateNarrowType.cpp
   InferGraph.cpp
   PackageTargets.cpp
   SelectTargets.cpp
@@ -14,6 +17,7 @@ add_mlir_dialect_library(MLIRMHALTransforms
   MLIRMHALPassIncGen
 
   LINK_LIBS PUBLIC
+  MLIRAffineDialect
   MLIRArithTransforms
   MLIRDialect
   MLIRMHAL
@@ -21,9 +25,9 @@ add_mlir_dialect_library(MLIRMHALTransforms
   MLIRFuncDialect
   MLIRGPUTransforms
   MLIRIR
+  MLIRMemRefTransforms
   MLIRPass
   MLIRLLVMDialect
   MLIRSupport
   MLIRTransformUtils
 )
-

@@ -28,7 +28,25 @@ def ConvertRockToGPUPass : Pass<"convert-rock-to-gpu", "ModuleOp"> {
     "gpu::GPUDialect",
     "LLVM::LLVMDialect",
     "memref::MemRefDialect",
-    "affine::AffineDialect"
+    "affine::AffineDialect",
+    "mhal::MHALDialect"
+  ];
+}
+
+//===----------------------------------------------------------------------===//
+// TosaToRock
+//===----------------------------------------------------------------------===//
+
+def RocmlirCustomTosaToLinalgPass : Pass<"rocmlir-custom-tosa-to-linalg", ""> {
+  let summary = "Lower RocMLIR's custom TOSA ops to Linalg";
+  let description = [{
+    Pass that converts RocMLIR's custom TOSA operators to `linalg`.
+  }];
+  let dependentDialects = [
+    "arith::ArithDialect",
+    "linalg::LinalgDialect",
+    "tensor::TensorDialect",
+    "tosa::TosaDialect"
   ];
 }
 
@@ -62,8 +80,7 @@ def MIGraphXToTosaPass : Pass<"migraphx-to-tosa", "::mlir::func::FuncOp"> {
   let dependentDialects = [
     "func::FuncDialect",
     "tosa::TosaDialect",
-    "arith::ArithDialect",
-    "mhal::MHALDialect"
+    "mhal::MHALDialect",
   ];
 }
 

@@ -9,8 +9,8 @@
 #ifndef ROCK_UTILITY_LOWERINGUTILS_H
 #define ROCK_UTILITY_LOWERINGUTILS_H
 
+#include "mlir/Analysis/BufferDependencyAnalysis.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
-#include "mlir/Dialect/MHAL/IR/MHAL.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Rock/IR/RockTypes.h"
 #include "mlir/Dialect/Rock/IR/TransformMapBuilder.h"
@@ -19,9 +19,12 @@
 #include "llvm/ADT/SmallVector.h"
 
 namespace mlir {
-struct LogicalResult;
 class Operation;
 class Type;
+
+namespace gpu {
+enum class AddressSpace : uint32_t;
+}
 
 namespace rock {
 struct ConvolutionDims;
@@ -122,10 +125,9 @@ LogicalResult calculateKBlockNum(const int64_t batchSize,
 /// partipate the backward data convolution. The ID -1 represents a zero
 /// initialization utility kernel The zero initialization kernel, if needed,
 /// would be placed in the front of the vector.
-SmallVector<int64_t>
-backwardDataKernelIds(int64_t strideHeight, int64_t strideWidth,
-                      int64_t dilationHeight, int64_t dilationWidth,
-                      int64_t filterHeight, int64_t filterWidth);
+SmallVector<int64_t> backwardDataKernelIds(ArrayRef<int64_t> strideDims,
+                                           ArrayRef<int64_t> dilationDims,
+                                           ArrayRef<int64_t> filterDims);
 
 /// Return a vector type of length `len` if `len` is more than 1, otherwise,
 /// return `type`.
@@ -183,15 +185,30 @@ FailureOr<UnitAttr> getReverseGrid(Operation *op);
 // Get gridSize
 FailureOr<IntegerAttr> getGridSize(Operation *op);
 
+// Get blockSize
+FailureOr<IntegerAttr> getBlockSize(Operation *op);
+
 // Return an affine map to reverse loop coordinates
 AffineMap getIdxReversalMap(OpBuilder &b);
 
 // helper to create ReassociationIndices for flattening
 ReassociationIndices getReassociationForFlattening(ShapedType srcTp);
 
-// Return `mhal::PrefillAttr` attributes for a given function
-SmallVector<mhal::PrefillAttr>
-getStoredPrefillAttributes(mlir::LLVM::LLVMFuncOp func);
+/// Construct a `memref.view` operation that interprets the buffer `buffer`,
+/// whose elements are bytes, as a buffer of `type`.
+TypedValue<MemRefType> viewBufferAs(OpBuilder &b, Value buffer, Type type);
+
+// helper to allocate memory on the GPU
+Value gpuAlloc(OpBuilder &b, Location loc, int64_t bufferDim, Type elementType,
+               gpu::AddressSpace memoryAddressSpace);
+
+// helper to verify a lds allocation fits in the GPU
+LogicalResult checkLDSSize(StringAttr arch, int64_t ldsBytes);
+
+// Trace gemm output back to its function arguments
+FailureOr<SmallVector<BlockArgument>>
+traceGemmOutputToArgs(Value matC, func::FuncOp func, OpBuilder &builder,
+                      const BufferDependencyAnalysis &deps);
 
 } // end namespace rock
 } // end namespace mlir

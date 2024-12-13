@@ -24,7 +24,6 @@
 #include "clang/AST/Mangle.h"
 #include "clang/Basic/ABI.h"
 #include "clang/Basic/LangOptions.h"
-#include "clang/Basic/Module.h"
 #include "clang/Basic/NoSanitizeList.h"
 #include "clang/Basic/ProfileList.h"
 #include "clang/Basic/TargetInfo.h"
@@ -70,6 +69,7 @@ class Expr;
 class Stmt;
 class StringLiteral;
 class NamedDecl;
+class PointerAuthSchema;
 class ValueDecl;
 class VarDecl;
 class LangOptions;
@@ -396,6 +396,32 @@ public:
   };
   using XteamRedKernelMap = llvm::DenseMap<const Stmt *, XteamRedKernelInfo>;
 
+  /// Metadata for multi-device kernel codegen
+  struct MultiDeviceBoundsInfo {
+    MultiDeviceBoundsInfo(VarDecl *LBArg, VarDecl *UBArg)
+        : LBArg{LBArg}, UBArg{UBArg} {}
+    VarDecl *LBArg;
+    VarDecl *UBArg;
+  };
+  using MultiDeviceFunctionBoundsMap =
+      llvm::DenseMap<const llvm::Function *, MultiDeviceBoundsInfo>;
+
+  struct MultiDeviceKernelInfo {
+    MultiDeviceKernelInfo(OptKernelNestDirectives Dirs,
+                          MultiDeviceFunctionBoundsMap FBM,
+                          bool CanBeMultiDevice)
+        : MultiDeviceNestDirs{Dirs}, FunctionBoundsMap{FBM},
+          CanBeMultiDevice{CanBeMultiDevice} {}
+
+    OptKernelNestDirectives MultiDeviceNestDirs;
+    MultiDeviceFunctionBoundsMap FunctionBoundsMap;
+    bool CanBeMultiDevice;
+    bool NewBoundsHaveBeenUsed = false;
+  };
+  /// Map construct statement to corresponding metadata for a NoLoop kernel.
+  using MultiDeviceKernelMap =
+      llvm::DenseMap<const Stmt *, MultiDeviceKernelInfo>;
+
 private:
   ASTContext &Context;
   const LangOptions &LangOpts;
@@ -421,7 +447,7 @@ private:
   // This should not be moved earlier, since its initialization depends on some
   // of the previous reference members being already initialized and also checks
   // if TheTargetCodeGenInfo is NULL
-  CodeGenTypes Types;
+  std::unique_ptr<CodeGenTypes> Types;
 
   /// Holds information about C++ vtables.
   CodeGenVTables VTables;
@@ -448,6 +474,7 @@ private:
   NoLoopKernelMap NoLoopKernels;
   NoLoopKernelMap BigJumpLoopKernels;
   XteamRedKernelMap XteamRedKernels;
+  MultiDeviceKernelMap MultiDeviceKernels;
 
   // A set of references that have only been seen via a weakref so far. This is
   // used to remove the weak of the reference if we ever see a direct reference
@@ -547,7 +574,7 @@ private:
 
   // Store deferred function annotations so they can be emitted at the end with
   // most up to date ValueDecl that will have all the inherited annotations.
-  llvm::DenseMap<StringRef, const ValueDecl *> DeferredAnnotations;
+  llvm::MapVector<StringRef, const ValueDecl *> DeferredAnnotations;
 
   /// Map used to get unique annotation strings.
   llvm::StringMap<llvm::Constant*> AnnotationStrings;
@@ -596,6 +623,14 @@ private:
 
   typedef std::pair<OrderGlobalInitsOrStermFinalizers, llvm::Function *>
       GlobalInitData;
+
+  // When a tail call is performed on an "undefined" symbol, on PPC without pc
+  // relative feature, the tail call is not allowed. In "EmitCall" for such
+  // tail calls, the "undefined" symbols may be forward declarations, their
+  // definitions are provided in the module after the callsites. For such tail
+  // calls, diagnose message should not be emitted.
+  llvm::SmallSetVector<std::pair<const FunctionDecl *, SourceLocation>, 4>
+      MustTailCallUndefinedGlobals;
 
   struct GlobalInitPriorityCmp {
     bool operator()(const GlobalInitData &LHS,
@@ -667,6 +702,9 @@ private:
 
   bool isTriviallyRecursive(const FunctionDecl *F);
   bool shouldEmitFunction(GlobalDecl GD);
+  // Whether a global variable should be emitted by CUDA/HIP host/device
+  // related attributes.
+  bool shouldEmitCUDAGlobalVar(const VarDecl *VD) const;
   bool shouldOpportunisticallyEmitVTables();
   /// Map used to be sure we don't emit the same CompoundLiteral twice.
   llvm::DenseMap<const CompoundLiteralExpr *, llvm::GlobalVariable *>
@@ -720,6 +758,13 @@ private:
   // when used with -fincremental-extensions.
   std::pair<std::unique_ptr<CodeGenFunction>, const TopLevelStmtDecl *>
       GlobalTopLevelStmtBlockInFlight;
+
+  llvm::DenseMap<GlobalDecl, uint16_t> PtrAuthDiscriminatorHashes;
+
+  llvm::DenseMap<const CXXRecordDecl *, std::optional<PointerAuthQualifier>>
+      VTablePtrAuthInfos;
+  std::optional<PointerAuthQualifier>
+  computeVTPointerAuthentication(const CXXRecordDecl *ThisClass);
 
 public:
   CodeGenModule(ASTContext &C, IntrusiveRefCntPtr<llvm::vfs::FileSystem> FS,
@@ -873,6 +918,7 @@ public:
   bool supportsCOMDAT() const;
   void maybeSetTrivialComdat(const Decl &D, llvm::GlobalObject &GO);
 
+  const ABIInfo &getABIInfo();
   CGCXXABI &getCXXABI() const { return *ABI; }
   llvm::LLVMContext &getLLVMContext() { return VMContext; }
 
@@ -880,7 +926,7 @@ public:
 
   const TargetCodeGenInfo &getTargetCodeGenInfo();
 
-  CodeGenTypes &getTypes() { return Types; }
+  CodeGenTypes &getTypes() { return *Types; }
 
   CodeGenVTables &getVTables() { return VTables; }
 
@@ -1053,11 +1099,69 @@ public:
   // Return the function body address of the given function.
   llvm::Constant *GetFunctionStart(const ValueDecl *Decl);
 
+  /// Return a function pointer for a reference to the given function.
+  /// This correctly handles weak references, but does not apply a
+  /// pointer signature.
+  llvm::Constant *getRawFunctionPointer(GlobalDecl GD,
+                                        llvm::Type *Ty = nullptr);
+
+  /// Return the ABI-correct function pointer value for a reference
+  /// to the given function.  This will apply a pointer signature if
+  /// necessary, caching the result for the given function.
+  llvm::Constant *getFunctionPointer(GlobalDecl GD, llvm::Type *Ty = nullptr);
+
+  /// Return the ABI-correct function pointer value for a reference
+  /// to the given function.  This will apply a pointer signature if
+  /// necessary.
+  llvm::Constant *getFunctionPointer(llvm::Constant *Pointer,
+                                     QualType FunctionType);
+
+  llvm::Constant *getMemberFunctionPointer(const FunctionDecl *FD,
+                                           llvm::Type *Ty = nullptr);
+
+  llvm::Constant *getMemberFunctionPointer(llvm::Constant *Pointer,
+                                           QualType FT);
+
+  CGPointerAuthInfo getFunctionPointerAuthInfo(QualType T);
+
+  CGPointerAuthInfo getMemberFunctionPointerAuthInfo(QualType FT);
+
+  CGPointerAuthInfo getPointerAuthInfoForPointeeType(QualType type);
+
+  CGPointerAuthInfo getPointerAuthInfoForType(QualType type);
+
+  bool shouldSignPointer(const PointerAuthSchema &Schema);
+  llvm::Constant *getConstantSignedPointer(llvm::Constant *Pointer,
+                                           const PointerAuthSchema &Schema,
+                                           llvm::Constant *StorageAddress,
+                                           GlobalDecl SchemaDecl,
+                                           QualType SchemaType);
+
+  llvm::Constant *
+  getConstantSignedPointer(llvm::Constant *Pointer, unsigned Key,
+                           llvm::Constant *StorageAddress,
+                           llvm::ConstantInt *OtherDiscriminator);
+
+  llvm::ConstantInt *
+  getPointerAuthOtherDiscriminator(const PointerAuthSchema &Schema,
+                                   GlobalDecl SchemaDecl, QualType SchemaType);
+
+  uint16_t getPointerAuthDeclDiscriminator(GlobalDecl GD);
+  std::optional<CGPointerAuthInfo>
+  getVTablePointerAuthInfo(CodeGenFunction *Context,
+                           const CXXRecordDecl *Record,
+                           llvm::Value *StorageAddress);
+
+  std::optional<PointerAuthQualifier>
+  getVTablePointerAuthentication(const CXXRecordDecl *thisClass);
+
+  CGPointerAuthInfo EmitPointerAuthInfo(const RecordDecl *RD);
+
   // Return whether RTTI information should be emitted for this target.
   bool shouldEmitRTTI(bool ForEH = false) {
     return (ForEH || getLangOpts().RTTI) && !getLangOpts().CUDAIsDevice &&
            !(getLangOpts().OpenMP && getLangOpts().OpenMPIsTargetDevice &&
-             getTriple().isNVPTX());
+             (getTriple().isNVPTX() || getTriple().isAMDGPU()));
   }
 
   /// Get the address of the RTTI descriptor for the given type.
@@ -1356,6 +1460,9 @@ public:
   /// Return true iff the given type uses 'sret' when used as a return type.
   bool ReturnTypeUsesSRet(const CGFunctionInfo &FI);
 
+  /// Return true iff the given type has `inreg` set.
+  bool ReturnTypeHasInReg(const CGFunctionInfo &FI);
+
   /// Return true iff the given type uses an argument slot when 'sret' is used
   /// as a return type.
   bool ReturnSlotInterferesWithArgs(const CGFunctionInfo &FI);
@@ -1397,7 +1504,7 @@ public:
 
   void EmitTentativeDefinition(const VarDecl *D);
 
-  void EmitExternalDeclaration(const VarDecl *D);
+  void EmitExternalDeclaration(const DeclaratorDecl *D);
 
   void EmitVTable(CXXRecordDecl *Class);
 
@@ -1802,6 +1909,12 @@ public:
   /// reduction variables are created for subsequent codegen phases to work on.
   NoLoopXteamErr checkAndSetXteamRedKernel(const OMPExecutableDirective &D);
 
+  /// If we are able to generate a multi-device kernel for this directive,
+  /// return true, otherwise return false. If successful, metadata for the
+  /// argument variables is created for subsequent codegen phases to work on.
+  bool checkAndSetMultiDeviceKernel(const OMPExecutableDirective &D,
+                                    bool CanBeMultiDevice);
+
   /// Compute the block size to be used for a kernel.
   int getWorkGroupSizeSPMDHelper(const OMPExecutableDirective &D);
   /// Used in optimized kernel codegen, compute the block size from the nested
@@ -1912,6 +2025,70 @@ public:
   void setCurrentXteamRedStmt(const Stmt *S) { CurrentXteamRedStmt = S; }
   const Stmt *getCurrentXteamRedStmt() { return CurrentXteamRedStmt; }
 
+  /// Return true if the provided expression accesses a variable in the provided
+  /// map, otherwise return false.
+  bool hasXteamRedVar(const Expr *E, const XteamRedVarMap &RedMap) const;
+
+  /// If present in the provided map, return the reduction variable accessed by
+  /// the provided expression, otherwise return nullptr.
+  const VarDecl *getXteamRedVarDecl(const Expr *E,
+                                    const XteamRedVarMap &RedMap) const;
+
+  /// Return true if the provided expression accesses the provided variable,
+  /// otherwise return false.
+  bool isXteamRedVarExpr(const Expr *E, const VarDecl *VD) const;
+
+  /// Are we generating multi-device kernel for the statement
+  bool multiDeviceFStmtEntryExists(const Stmt *S) {
+    return MultiDeviceKernels.find(S) != MultiDeviceKernels.end();
+  }
+  bool isMultiDeviceKernel(const Stmt *S) {
+    if (MultiDeviceKernels.find(S) == MultiDeviceKernels.end())
+      return false;
+    MultiDeviceKernelInfo MDInfo = MultiDeviceKernels.find(S)->second;
+    return MDInfo.CanBeMultiDevice;
+  }
+  bool isMultiDeviceKernel(const OMPExecutableDirective &D);
+
+  /// Given a ForStmt for which Multi Device codegen will be done, save the
+  /// metadata for the LB and UB args.
+  void saveMultiDeviceArgs(const OMPExecutableDirective &D,
+                           const llvm::Function *F, VarDecl *LBDecl,
+                           VarDecl *UBDecl) {
+    assert(isMultiDeviceKernel(getSingleForStmt(getOptKernelKey(D))) &&
+           "Must be a multi-device kernel");
+    const ForStmt *FStmt = getSingleForStmt(getOptKernelKey(D));
+    assert((MultiDeviceKernels.find(FStmt) != MultiDeviceKernels.end()) &&
+           "FStmt not found");
+    MultiDeviceKernelInfo &MDInfo = MultiDeviceKernels.find(FStmt)->second;
+    MDInfo.FunctionBoundsMap.insert(
+        std::make_pair(F, MultiDeviceBoundsInfo(LBDecl, UBDecl)));
+  }
+
+  /// Retrieve the metadata for the LB arg.
+  MultiDeviceBoundsInfo getMultiDeviceBounds(const OMPExecutableDirective &D,
+                                             const llvm::Function *F) {
+    const ForStmt *FStmt = getSingleForStmt(getOptKernelKey(D));
+    assert((MultiDeviceKernels.find(FStmt) != MultiDeviceKernels.end()) &&
+           "FStmt not found");
+    MultiDeviceKernelInfo MDInfo = MultiDeviceKernels.find(FStmt)->second;
+    assert(MDInfo.FunctionBoundsMap.find(F) != MDInfo.FunctionBoundsMap.end() &&
+           "Function must exist");
+    return MDInfo.FunctionBoundsMap.find(F)->second;
+  }
+
+  /// Retrieve the metadata for the LB arg.
+  VarDecl *getMultiDeviceLBArg(const OMPExecutableDirective &D,
+                               const llvm::Function *F) {
+    return getMultiDeviceBounds(D, F).LBArg;
+  }
+
+  /// Retrieve the metadata for the LB arg.
+  VarDecl *getMultiDeviceUBArg(const OMPExecutableDirective &D,
+                               const llvm::Function *F) {
+    return getMultiDeviceBounds(D, F).UBArg;
+  }
+
   /// Move some lazily-emitted states to the NewBuilder. This is especially
   /// essential for the incremental parsing environment like Clang Interpreter,
   /// because we'll lose all important information after each repl.
@@ -1952,7 +2129,22 @@ public:
   void AddGlobalDtor(llvm::Function *Dtor, int Priority = 65535,
                      bool IsDtorAttrFunc = false);
 
+  // Return whether structured convergence intrinsics should be generated for
+  // this target.
+  bool shouldEmitConvergenceTokens() const {
+    // TODO: this should probably become unconditional once the controlled
+    // convergence becomes the norm.
+    return getTriple().isSPIRVLogical();
+  }
+
+  void addUndefinedGlobalForTailCall(
+      std::pair<const FunctionDecl *, SourceLocation> Global) {
+    MustTailCallUndefinedGlobals.insert(Global);
+  }
+
 private:
+  bool shouldDropDLLAttribute(const Decl *D, const llvm::GlobalValue *GV) const;
+
   llvm::Constant *GetOrCreateLLVMFunction(
       StringRef MangledName, llvm::Type *Ty, GlobalDecl D, bool ForVTable,
       bool DontDefer = false, bool IsThunk = false,
@@ -1993,6 +2185,7 @@ private:
 
   void EmitGlobalVarDefinition(const VarDecl *D, bool IsTentative = false);
   void EmitExternalVarDeclaration(const VarDecl *D);
+  void EmitExternalFunctionDeclaration(const FunctionDecl *D);
   void EmitAliasDefinition(GlobalDecl GD);
   void emitIFuncDefinition(GlobalDecl GD);
   void emitCPUDispatchDefinition(GlobalDecl GD);
@@ -2178,6 +2371,15 @@ private:
   std::pair<NoLoopXteamErr, std::pair<CodeGenModule::XteamRedVarMap,
                                       CodeGenModule::XteamRedVarVecTy>>
   collectXteamRedVars(const OptKernelNestDirectives &NestDirs);
+
+  /// Top level checker for multi device of the loop
+  NoLoopXteamErr getMultiDeviceForStmtStatus(const OMPExecutableDirective &,
+                                             const Stmt *);
+
+  /// Are clauses on a combined OpenMP construct compatible with multi-device
+  /// codegen?
+  NoLoopXteamErr
+  getMultiDeviceStatusForClauses(const OptKernelNestDirectives &NestDirs);
 };
 
 }  // end namespace CodeGen

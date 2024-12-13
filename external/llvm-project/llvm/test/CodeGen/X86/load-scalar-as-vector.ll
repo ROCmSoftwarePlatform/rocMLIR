@@ -5,7 +5,7 @@
 ; RUN: llc < %s -mtriple=x86_64-- -mattr=+avx2       | FileCheck %s --check-prefix=AVX
 ; RUN: llc < %s -mtriple=x86_64-- -mattr=+avx512dq,+avx512bw | FileCheck %s --check-prefix=AVX
 
-define <4 x i32> @add_op1_constant(i32* %p) nounwind {
+define <4 x i32> @add_op1_constant(ptr %p) nounwind {
 ; SSE-LABEL: add_op1_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movl (%rdi), %eax
@@ -19,7 +19,7 @@ define <4 x i32> @add_op1_constant(i32* %p) nounwind {
 ; AVX-NEXT:    addl $42, %eax
 ; AVX-NEXT:    vmovd %eax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i32, i32* %p
+  %x = load i32, ptr %p
   %b = add i32 %x, 42
   %r = insertelement <4 x i32> undef, i32 %b, i32 0
   ret <4 x i32> %r
@@ -27,7 +27,7 @@ define <4 x i32> @add_op1_constant(i32* %p) nounwind {
 
 ; Code and data size may increase by using more vector ops, so the transform is disabled here.
 
-define <4 x i32> @add_op1_constant_optsize(i32* %p) nounwind optsize {
+define <4 x i32> @add_op1_constant_optsize(ptr %p) nounwind optsize {
 ; SSE-LABEL: add_op1_constant_optsize:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movl (%rdi), %eax
@@ -41,13 +41,13 @@ define <4 x i32> @add_op1_constant_optsize(i32* %p) nounwind optsize {
 ; AVX-NEXT:    addl $42, %eax
 ; AVX-NEXT:    vmovd %eax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i32, i32* %p
+  %x = load i32, ptr %p
   %b = add i32 %x, 42
   %r = insertelement <4 x i32> undef, i32 %b, i32 0
   ret <4 x i32> %r
 }
 
-define <8 x i16> @add_op0_constant(i16* %p) nounwind {
+define <8 x i16> @add_op0_constant(ptr %p) nounwind {
 ; SSE-LABEL: add_op0_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movzwl (%rdi), %eax
@@ -61,13 +61,13 @@ define <8 x i16> @add_op0_constant(i16* %p) nounwind {
 ; AVX-NEXT:    addl $42, %eax
 ; AVX-NEXT:    vmovd %eax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i16, i16* %p
+  %x = load i16, ptr %p
   %b = add i16 42, %x
   %r = insertelement <8 x i16> undef, i16 %b, i32 0
   ret <8 x i16> %r
 }
 
-define <2 x i64> @sub_op0_constant(i64* %p) nounwind {
+define <2 x i64> @sub_op0_constant(ptr %p) nounwind {
 ; SSE-LABEL: sub_op0_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movl $42, %eax
@@ -81,13 +81,13 @@ define <2 x i64> @sub_op0_constant(i64* %p) nounwind {
 ; AVX-NEXT:    subq (%rdi), %rax
 ; AVX-NEXT:    vmovq %rax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i64, i64* %p
+  %x = load i64, ptr %p
   %b = sub i64 42, %x
   %r = insertelement <2 x i64> undef, i64 %b, i32 0
   ret <2 x i64> %r
 }
 
-define <16 x i8> @sub_op1_constant(i8* %p) nounwind {
+define <16 x i8> @sub_op1_constant(ptr %p) nounwind {
 ; SSE-LABEL: sub_op1_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movzbl (%rdi), %eax
@@ -102,13 +102,13 @@ define <16 x i8> @sub_op1_constant(i8* %p) nounwind {
 ; AVX-NEXT:    addb $-42, %al
 ; AVX-NEXT:    vmovd %eax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i8, i8* %p
+  %x = load i8, ptr %p
   %b = sub i8 %x, 42
   %r = insertelement <16 x i8> undef, i8 %b, i32 0
   ret <16 x i8> %r
 }
 
-define <4 x i32> @mul_op1_constant(i32* %p) nounwind {
+define <4 x i32> @mul_op1_constant(ptr %p) nounwind {
 ; SSE-LABEL: mul_op1_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    imull $42, (%rdi), %eax
@@ -120,13 +120,13 @@ define <4 x i32> @mul_op1_constant(i32* %p) nounwind {
 ; AVX-NEXT:    imull $42, (%rdi), %eax
 ; AVX-NEXT:    vmovd %eax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i32, i32* %p
+  %x = load i32, ptr %p
   %b = mul i32 %x, 42
   %r = insertelement <4 x i32> undef, i32 %b, i32 0
   ret <4 x i32> %r
 }
 
-define <8 x i16> @mul_op0_constant(i16* %p) nounwind {
+define <8 x i16> @mul_op0_constant(ptr %p) nounwind {
 ; SSE-LABEL: mul_op0_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movzwl (%rdi), %eax
@@ -140,13 +140,13 @@ define <8 x i16> @mul_op0_constant(i16* %p) nounwind {
 ; AVX-NEXT:    imull $42, %eax, %eax
 ; AVX-NEXT:    vmovd %eax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i16, i16* %p
+  %x = load i16, ptr %p
   %b = mul i16 42, %x
   %r = insertelement <8 x i16> undef, i16 %b, i32 0
   ret <8 x i16> %r
 }
 
-define <4 x i32> @and_op1_constant(i32* %p) nounwind {
+define <4 x i32> @and_op1_constant(ptr %p) nounwind {
 ; SSE-LABEL: and_op1_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movl (%rdi), %eax
@@ -160,13 +160,13 @@ define <4 x i32> @and_op1_constant(i32* %p) nounwind {
 ; AVX-NEXT:    andl $42, %eax
 ; AVX-NEXT:    vmovd %eax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i32, i32* %p
+  %x = load i32, ptr %p
   %b = and i32 %x, 42
   %r = insertelement <4 x i32> undef, i32 %b, i32 0
   ret <4 x i32> %r
 }
 
-define <2 x i64> @or_op1_constant(i64* %p) nounwind {
+define <2 x i64> @or_op1_constant(ptr %p) nounwind {
 ; SSE-LABEL: or_op1_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movq (%rdi), %rax
@@ -180,13 +180,13 @@ define <2 x i64> @or_op1_constant(i64* %p) nounwind {
 ; AVX-NEXT:    orq $42, %rax
 ; AVX-NEXT:    vmovq %rax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i64, i64* %p
+  %x = load i64, ptr %p
   %b = or i64 %x, 42
   %r = insertelement <2 x i64> undef, i64 %b, i32 0
   ret <2 x i64> %r
 }
 
-define <8 x i16> @xor_op1_constant(i16* %p) nounwind {
+define <8 x i16> @xor_op1_constant(ptr %p) nounwind {
 ; SSE-LABEL: xor_op1_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movzwl (%rdi), %eax
@@ -200,13 +200,13 @@ define <8 x i16> @xor_op1_constant(i16* %p) nounwind {
 ; AVX-NEXT:    xorl $42, %eax
 ; AVX-NEXT:    vmovd %eax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i16, i16* %p
+  %x = load i16, ptr %p
   %b = xor i16 %x, 42
   %r = insertelement <8 x i16> undef, i16 %b, i32 0
   ret <8 x i16> %r
 }
 
-define <4 x i32> @shl_op0_constant(i32* %p) nounwind {
+define <4 x i32> @shl_op0_constant(ptr %p) nounwind {
 ; SSE-LABEL: shl_op0_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movzbl (%rdi), %ecx
@@ -222,13 +222,13 @@ define <4 x i32> @shl_op0_constant(i32* %p) nounwind {
 ; AVX-NEXT:    shll %cl, %eax
 ; AVX-NEXT:    vmovd %eax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i32, i32* %p
+  %x = load i32, ptr %p
   %b = shl i32 42, %x
   %r = insertelement <4 x i32> undef, i32 %b, i32 0
   ret <4 x i32> %r
 }
 
-define <16 x i8> @shl_op1_constant(i8* %p) nounwind {
+define <16 x i8> @shl_op1_constant(ptr %p) nounwind {
 ; SSE-LABEL: shl_op1_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movzbl (%rdi), %eax
@@ -243,13 +243,13 @@ define <16 x i8> @shl_op1_constant(i8* %p) nounwind {
 ; AVX-NEXT:    shlb $5, %al
 ; AVX-NEXT:    vmovd %eax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i8, i8* %p
+  %x = load i8, ptr %p
   %b = shl i8 %x, 5
   %r = insertelement <16 x i8> undef, i8 %b, i32 0
   ret <16 x i8> %r
 }
 
-define <2 x i64> @lshr_op0_constant(i64* %p) nounwind {
+define <2 x i64> @lshr_op0_constant(ptr %p) nounwind {
 ; SSE-LABEL: lshr_op0_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movzbl (%rdi), %ecx
@@ -265,33 +265,31 @@ define <2 x i64> @lshr_op0_constant(i64* %p) nounwind {
 ; AVX-NEXT:    shrq %cl, %rax
 ; AVX-NEXT:    vmovd %eax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i64, i64* %p
+  %x = load i64, ptr %p
   %b = lshr i64 42, %x
   %r = insertelement <2 x i64> undef, i64 %b, i32 0
   ret <2 x i64> %r
 }
 
-define <4 x i32> @lshr_op1_constant(i32* %p) nounwind {
+define <4 x i32> @lshr_op1_constant(ptr %p) nounwind {
 ; SSE-LABEL: lshr_op1_constant:
 ; SSE:       # %bb.0:
-; SSE-NEXT:    movl (%rdi), %eax
-; SSE-NEXT:    shrl $17, %eax
-; SSE-NEXT:    movd %eax, %xmm0
+; SSE-NEXT:    movd {{.*#+}} xmm0 = mem[0],zero,zero,zero
+; SSE-NEXT:    psrld $17, %xmm0
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: lshr_op1_constant:
 ; AVX:       # %bb.0:
-; AVX-NEXT:    movl (%rdi), %eax
-; AVX-NEXT:    shrl $17, %eax
-; AVX-NEXT:    vmovd %eax, %xmm0
+; AVX-NEXT:    vmovd {{.*#+}} xmm0 = mem[0],zero,zero,zero
+; AVX-NEXT:    vpsrld $17, %xmm0, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i32, i32* %p
+  %x = load i32, ptr %p
   %b = lshr i32 %x, 17
   %r = insertelement <4 x i32> undef, i32 %b, i32 0
   ret <4 x i32> %r
 }
 
-define <8 x i16> @ashr_op0_constant(i16* %p) nounwind {
+define <8 x i16> @ashr_op0_constant(ptr %p) nounwind {
 ; SSE-LABEL: ashr_op0_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movzbl (%rdi), %ecx
@@ -307,33 +305,33 @@ define <8 x i16> @ashr_op0_constant(i16* %p) nounwind {
 ; AVX-NEXT:    sarl %cl, %eax
 ; AVX-NEXT:    vmovd %eax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i16, i16* %p
+  %x = load i16, ptr %p
   %b = ashr i16 -42, %x
   %r = insertelement <8 x i16> undef, i16 %b, i32 0
   ret <8 x i16> %r
 }
 
-define <8 x i16> @ashr_op1_constant(i16* %p) nounwind {
+define <8 x i16> @ashr_op1_constant(ptr %p) nounwind {
 ; SSE-LABEL: ashr_op1_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movswl (%rdi), %eax
-; SSE-NEXT:    sarl $7, %eax
 ; SSE-NEXT:    movd %eax, %xmm0
+; SSE-NEXT:    psrad $7, %xmm0
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: ashr_op1_constant:
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    movswl (%rdi), %eax
-; AVX-NEXT:    sarl $7, %eax
 ; AVX-NEXT:    vmovd %eax, %xmm0
+; AVX-NEXT:    vpsrad $7, %xmm0, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i16, i16* %p
+  %x = load i16, ptr %p
   %b = ashr i16 %x, 7
   %r = insertelement <8 x i16> undef, i16 %b, i32 0
   ret <8 x i16> %r
 }
 
-define <4 x i32> @sdiv_op0_constant(i32* %p) nounwind {
+define <4 x i32> @sdiv_op0_constant(ptr %p) nounwind {
 ; SSE-LABEL: sdiv_op0_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movl $42, %eax
@@ -349,13 +347,13 @@ define <4 x i32> @sdiv_op0_constant(i32* %p) nounwind {
 ; AVX-NEXT:    idivl (%rdi)
 ; AVX-NEXT:    vmovd %eax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i32, i32* %p
+  %x = load i32, ptr %p
   %b = sdiv i32 42, %x
   %r = insertelement <4 x i32> undef, i32 %b, i32 0
   ret <4 x i32> %r
 }
 
-define <8 x i16> @sdiv_op1_constant(i16* %p) nounwind {
+define <8 x i16> @sdiv_op1_constant(ptr %p) nounwind {
 ; SSE-LABEL: sdiv_op1_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movswl (%rdi), %eax
@@ -383,13 +381,13 @@ define <8 x i16> @sdiv_op1_constant(i16* %p) nounwind {
 ; AVX-NEXT:    addl %eax, %ecx
 ; AVX-NEXT:    vmovd %ecx, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i16, i16* %p
+  %x = load i16, ptr %p
   %b = sdiv i16 %x, 42
   %r = insertelement <8 x i16> undef, i16 %b, i32 0
   ret <8 x i16> %r
 }
 
-define <8 x i16> @srem_op0_constant(i16* %p) nounwind {
+define <8 x i16> @srem_op0_constant(ptr %p) nounwind {
 ; SSE-LABEL: srem_op0_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movw $42, %ax
@@ -407,13 +405,13 @@ define <8 x i16> @srem_op0_constant(i16* %p) nounwind {
 ; AVX-NEXT:    # kill: def $dx killed $dx def $edx
 ; AVX-NEXT:    vmovd %edx, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i16, i16* %p
+  %x = load i16, ptr %p
   %b = srem i16 42, %x
   %r = insertelement <8 x i16> undef, i16 %b, i32 0
   ret <8 x i16> %r
 }
 
-define <4 x i32> @srem_op1_constant(i32* %p) nounwind {
+define <4 x i32> @srem_op1_constant(ptr %p) nounwind {
 ; SSE-LABEL: srem_op1_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movslq (%rdi), %rax
@@ -439,13 +437,13 @@ define <4 x i32> @srem_op1_constant(i32* %p) nounwind {
 ; AVX-NEXT:    subl %ecx, %eax
 ; AVX-NEXT:    vmovd %eax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i32, i32* %p
+  %x = load i32, ptr %p
   %b = srem i32 %x, 42
   %r = insertelement <4 x i32> undef, i32 %b, i32 0
   ret <4 x i32> %r
 }
 
-define <4 x i32> @udiv_op0_constant(i32* %p) nounwind {
+define <4 x i32> @udiv_op0_constant(ptr %p) nounwind {
 ; SSE-LABEL: udiv_op0_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movl $42, %eax
@@ -461,21 +459,21 @@ define <4 x i32> @udiv_op0_constant(i32* %p) nounwind {
 ; AVX-NEXT:    divl (%rdi)
 ; AVX-NEXT:    vmovd %eax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i32, i32* %p
+  %x = load i32, ptr %p
   %b = udiv i32 42, %x
   %r = insertelement <4 x i32> undef, i32 %b, i32 0
   ret <4 x i32> %r
 }
 
-define <2 x i64> @udiv_op1_constant(i64* %p) nounwind {
+define <2 x i64> @udiv_op1_constant(ptr %p) nounwind {
 ; SSE-LABEL: udiv_op1_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movq (%rdi), %rax
 ; SSE-NEXT:    shrq %rax
 ; SSE-NEXT:    movabsq $-4392081922311798003, %rcx # imm = 0xC30C30C30C30C30D
 ; SSE-NEXT:    mulq %rcx
-; SSE-NEXT:    shrq $4, %rdx
 ; SSE-NEXT:    movq %rdx, %xmm0
+; SSE-NEXT:    psrlq $4, %xmm0
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: udiv_op1_constant:
@@ -484,16 +482,16 @@ define <2 x i64> @udiv_op1_constant(i64* %p) nounwind {
 ; AVX-NEXT:    shrq %rax
 ; AVX-NEXT:    movabsq $-4392081922311798003, %rcx # imm = 0xC30C30C30C30C30D
 ; AVX-NEXT:    mulq %rcx
-; AVX-NEXT:    shrq $4, %rdx
 ; AVX-NEXT:    vmovq %rdx, %xmm0
+; AVX-NEXT:    vpsrlq $4, %xmm0, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i64, i64* %p
+  %x = load i64, ptr %p
   %b = udiv i64 %x, 42
   %r = insertelement <2 x i64> undef, i64 %b, i32 0
   ret <2 x i64> %r
 }
 
-define <2 x i64> @urem_op0_constant(i64* %p) nounwind {
+define <2 x i64> @urem_op0_constant(ptr %p) nounwind {
 ; SSE-LABEL: urem_op0_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movl $42, %eax
@@ -509,13 +507,13 @@ define <2 x i64> @urem_op0_constant(i64* %p) nounwind {
 ; AVX-NEXT:    divq (%rdi)
 ; AVX-NEXT:    vmovq %rdx, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i64, i64* %p
+  %x = load i64, ptr %p
   %b = urem i64 42, %x
   %r = insertelement <2 x i64> undef, i64 %b, i32 0
   ret <2 x i64> %r
 }
 
-define <16 x i8> @urem_op1_constant(i8* %p) nounwind {
+define <16 x i8> @urem_op1_constant(ptr %p) nounwind {
 ; SSE-LABEL: urem_op1_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movzbl (%rdi), %eax
@@ -542,13 +540,13 @@ define <16 x i8> @urem_op1_constant(i8* %p) nounwind {
 ; AVX-NEXT:    subb %cl, %al
 ; AVX-NEXT:    vmovd %eax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i8, i8* %p
+  %x = load i8, ptr %p
   %b = urem i8 %x, 42
   %r = insertelement <16 x i8> undef, i8 %b, i32 0
   ret <16 x i8> %r
 }
 
-define <4 x float> @fadd_op1_constant(float* %p) nounwind {
+define <4 x float> @fadd_op1_constant(ptr %p) nounwind {
 ; SSE-LABEL: fadd_op1_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movss {{.*#+}} xmm0 = mem[0],zero,zero,zero
@@ -560,13 +558,13 @@ define <4 x float> @fadd_op1_constant(float* %p) nounwind {
 ; AVX-NEXT:    vmovss {{.*#+}} xmm0 = mem[0],zero,zero,zero
 ; AVX-NEXT:    vaddss {{\.?LCPI[0-9]+_[0-9]+}}(%rip), %xmm0, %xmm0
 ; AVX-NEXT:    retq
-  %x = load float, float* %p
+  %x = load float, ptr %p
   %b = fadd float %x, 42.0
   %r = insertelement <4 x float> undef, float %b, i32 0
   ret <4 x float> %r
 }
 
-define <2 x double> @fsub_op1_constant(double* %p) nounwind {
+define <2 x double> @fsub_op1_constant(ptr %p) nounwind {
 ; SSE-LABEL: fsub_op1_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movsd {{.*#+}} xmm0 = mem[0],zero
@@ -578,13 +576,13 @@ define <2 x double> @fsub_op1_constant(double* %p) nounwind {
 ; AVX-NEXT:    vmovsd {{.*#+}} xmm0 = mem[0],zero
 ; AVX-NEXT:    vaddsd {{\.?LCPI[0-9]+_[0-9]+}}(%rip), %xmm0, %xmm0
 ; AVX-NEXT:    retq
-  %x = load double, double* %p
+  %x = load double, ptr %p
   %b = fsub double %x, 42.0
   %r = insertelement <2 x double> undef, double %b, i32 0
   ret <2 x double> %r
 }
 
-define <4 x float> @fsub_op0_constant(float* %p) nounwind {
+define <4 x float> @fsub_op0_constant(ptr %p) nounwind {
 ; SSE-LABEL: fsub_op0_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movss {{.*#+}} xmm0 = [4.2E+1,0.0E+0,0.0E+0,0.0E+0]
@@ -596,13 +594,13 @@ define <4 x float> @fsub_op0_constant(float* %p) nounwind {
 ; AVX-NEXT:    vmovss {{.*#+}} xmm0 = [4.2E+1,0.0E+0,0.0E+0,0.0E+0]
 ; AVX-NEXT:    vsubss (%rdi), %xmm0, %xmm0
 ; AVX-NEXT:    retq
-  %x = load float, float* %p
+  %x = load float, ptr %p
   %b = fsub float 42.0, %x
   %r = insertelement <4 x float> undef, float %b, i32 0
   ret <4 x float> %r
 }
 
-define <4 x float> @fmul_op1_constant(float* %p) nounwind {
+define <4 x float> @fmul_op1_constant(ptr %p) nounwind {
 ; SSE-LABEL: fmul_op1_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movss {{.*#+}} xmm0 = mem[0],zero,zero,zero
@@ -614,13 +612,13 @@ define <4 x float> @fmul_op1_constant(float* %p) nounwind {
 ; AVX-NEXT:    vmovss {{.*#+}} xmm0 = mem[0],zero,zero,zero
 ; AVX-NEXT:    vmulss {{\.?LCPI[0-9]+_[0-9]+}}(%rip), %xmm0, %xmm0
 ; AVX-NEXT:    retq
-  %x = load float, float* %p
+  %x = load float, ptr %p
   %b = fmul float %x, 42.0
   %r = insertelement <4 x float> undef, float %b, i32 0
   ret <4 x float> %r
 }
 
-define <2 x double> @fdiv_op1_constant(double* %p) nounwind {
+define <2 x double> @fdiv_op1_constant(ptr %p) nounwind {
 ; SSE-LABEL: fdiv_op1_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movsd {{.*#+}} xmm0 = mem[0],zero
@@ -632,13 +630,13 @@ define <2 x double> @fdiv_op1_constant(double* %p) nounwind {
 ; AVX-NEXT:    vmovsd {{.*#+}} xmm0 = mem[0],zero
 ; AVX-NEXT:    vdivsd {{\.?LCPI[0-9]+_[0-9]+}}(%rip), %xmm0, %xmm0
 ; AVX-NEXT:    retq
-  %x = load double, double* %p
+  %x = load double, ptr %p
   %b = fdiv double %x, 42.0
   %r = insertelement <2 x double> undef, double %b, i32 0
   ret <2 x double> %r
 }
 
-define <4 x float> @fdiv_op0_constant(float* %p) nounwind {
+define <4 x float> @fdiv_op0_constant(ptr %p) nounwind {
 ; SSE-LABEL: fdiv_op0_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movss {{.*#+}} xmm0 = [4.2E+1,0.0E+0,0.0E+0,0.0E+0]
@@ -650,13 +648,13 @@ define <4 x float> @fdiv_op0_constant(float* %p) nounwind {
 ; AVX-NEXT:    vmovss {{.*#+}} xmm0 = [4.2E+1,0.0E+0,0.0E+0,0.0E+0]
 ; AVX-NEXT:    vdivss (%rdi), %xmm0, %xmm0
 ; AVX-NEXT:    retq
-  %x = load float, float* %p
+  %x = load float, ptr %p
   %b = fdiv float 42.0, %x
   %r = insertelement <4 x float> undef, float %b, i32 0
   ret <4 x float> %r
 }
 
-define <4 x float> @frem_op1_constant(float* %p) nounwind {
+define <4 x float> @frem_op1_constant(ptr %p) nounwind {
 ; SSE-LABEL: frem_op1_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    pushq %rax
@@ -674,13 +672,13 @@ define <4 x float> @frem_op1_constant(float* %p) nounwind {
 ; AVX-NEXT:    callq fmodf@PLT
 ; AVX-NEXT:    popq %rax
 ; AVX-NEXT:    retq
-  %x = load float, float* %p
+  %x = load float, ptr %p
   %b = frem float %x, 42.0
   %r = insertelement <4 x float> undef, float %b, i32 0
   ret <4 x float> %r
 }
 
-define <2 x double> @frem_op0_constant(double* %p) nounwind {
+define <2 x double> @frem_op0_constant(ptr %p) nounwind {
 ; SSE-LABEL: frem_op0_constant:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    pushq %rax
@@ -698,7 +696,7 @@ define <2 x double> @frem_op0_constant(double* %p) nounwind {
 ; AVX-NEXT:    callq fmod@PLT
 ; AVX-NEXT:    popq %rax
 ; AVX-NEXT:    retq
-  %x = load double, double* %p
+  %x = load double, ptr %p
   %b = frem double 42.0, %x
   %r = insertelement <2 x double> undef, double %b, i32 0
   ret <2 x double> %r
@@ -706,7 +704,7 @@ define <2 x double> @frem_op0_constant(double* %p) nounwind {
 
 ; Try again with 256-bit types.
 
-define <8 x i32> @add_op1_constant_v8i32(i32* %p) nounwind {
+define <8 x i32> @add_op1_constant_v8i32(ptr %p) nounwind {
 ; SSE-LABEL: add_op1_constant_v8i32:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movl (%rdi), %eax
@@ -720,13 +718,13 @@ define <8 x i32> @add_op1_constant_v8i32(i32* %p) nounwind {
 ; AVX-NEXT:    addl $42, %eax
 ; AVX-NEXT:    vmovd %eax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i32, i32* %p
+  %x = load i32, ptr %p
   %b = add i32 %x, 42
   %r = insertelement <8 x i32> undef, i32 %b, i32 0
   ret <8 x i32> %r
 }
 
-define <4 x i64> @sub_op0_constant_v4i64(i64* %p) nounwind {
+define <4 x i64> @sub_op0_constant_v4i64(ptr %p) nounwind {
 ; SSE-LABEL: sub_op0_constant_v4i64:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movl $42, %eax
@@ -740,13 +738,13 @@ define <4 x i64> @sub_op0_constant_v4i64(i64* %p) nounwind {
 ; AVX-NEXT:    subq (%rdi), %rax
 ; AVX-NEXT:    vmovq %rax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i64, i64* %p
+  %x = load i64, ptr %p
   %b = sub i64 42, %x
   %r = insertelement <4 x i64> undef, i64 %b, i32 0
   ret <4 x i64> %r
 }
 
-define <8 x i32> @mul_op1_constant_v8i32(i32* %p) nounwind {
+define <8 x i32> @mul_op1_constant_v8i32(ptr %p) nounwind {
 ; SSE-LABEL: mul_op1_constant_v8i32:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    imull $42, (%rdi), %eax
@@ -758,13 +756,13 @@ define <8 x i32> @mul_op1_constant_v8i32(i32* %p) nounwind {
 ; AVX-NEXT:    imull $42, (%rdi), %eax
 ; AVX-NEXT:    vmovd %eax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i32, i32* %p
+  %x = load i32, ptr %p
   %b = mul i32 %x, 42
   %r = insertelement <8 x i32> undef, i32 %b, i32 0
   ret <8 x i32> %r
 }
 
-define <4 x i64> @or_op1_constant_v4i64(i64* %p) nounwind {
+define <4 x i64> @or_op1_constant_v4i64(ptr %p) nounwind {
 ; SSE-LABEL: or_op1_constant_v4i64:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movq (%rdi), %rax
@@ -778,7 +776,7 @@ define <4 x i64> @or_op1_constant_v4i64(i64* %p) nounwind {
 ; AVX-NEXT:    orq $42, %rax
 ; AVX-NEXT:    vmovq %rax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i64, i64* %p
+  %x = load i64, ptr %p
   %b = or i64 %x, 42
   %r = insertelement <4 x i64> undef, i64 %b, i32 0
   ret <4 x i64> %r
@@ -786,7 +784,7 @@ define <4 x i64> @or_op1_constant_v4i64(i64* %p) nounwind {
 
 ; Try again with 512-bit types.
 
-define <16 x i32> @add_op1_constant_v16i32(i32* %p) nounwind {
+define <16 x i32> @add_op1_constant_v16i32(ptr %p) nounwind {
 ; SSE-LABEL: add_op1_constant_v16i32:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movl (%rdi), %eax
@@ -800,13 +798,13 @@ define <16 x i32> @add_op1_constant_v16i32(i32* %p) nounwind {
 ; AVX-NEXT:    addl $42, %eax
 ; AVX-NEXT:    vmovd %eax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i32, i32* %p
+  %x = load i32, ptr %p
   %b = add i32 %x, 42
   %r = insertelement <16 x i32> undef, i32 %b, i32 0
   ret <16 x i32> %r
 }
 
-define <8 x i64> @sub_op0_constant_v8i64(i64* %p) nounwind {
+define <8 x i64> @sub_op0_constant_v8i64(ptr %p) nounwind {
 ; SSE-LABEL: sub_op0_constant_v8i64:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movl $42, %eax
@@ -820,13 +818,13 @@ define <8 x i64> @sub_op0_constant_v8i64(i64* %p) nounwind {
 ; AVX-NEXT:    subq (%rdi), %rax
 ; AVX-NEXT:    vmovq %rax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i64, i64* %p
+  %x = load i64, ptr %p
   %b = sub i64 42, %x
   %r = insertelement <8 x i64> undef, i64 %b, i32 0
   ret <8 x i64> %r
 }
 
-define <16 x i32> @mul_op1_constant_v16i32(i32* %p) nounwind {
+define <16 x i32> @mul_op1_constant_v16i32(ptr %p) nounwind {
 ; SSE-LABEL: mul_op1_constant_v16i32:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    imull $42, (%rdi), %eax
@@ -838,13 +836,13 @@ define <16 x i32> @mul_op1_constant_v16i32(i32* %p) nounwind {
 ; AVX-NEXT:    imull $42, (%rdi), %eax
 ; AVX-NEXT:    vmovd %eax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i32, i32* %p
+  %x = load i32, ptr %p
   %b = mul i32 %x, 42
   %r = insertelement <16 x i32> undef, i32 %b, i32 0
   ret <16 x i32> %r
 }
 
-define <8 x i64> @or_op1_constant_v8i64(i64* %p) nounwind {
+define <8 x i64> @or_op1_constant_v8i64(ptr %p) nounwind {
 ; SSE-LABEL: or_op1_constant_v8i64:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movq (%rdi), %rax
@@ -858,7 +856,7 @@ define <8 x i64> @or_op1_constant_v8i64(i64* %p) nounwind {
 ; AVX-NEXT:    orq $42, %rax
 ; AVX-NEXT:    vmovq %rax, %xmm0
 ; AVX-NEXT:    retq
-  %x = load i64, i64* %p
+  %x = load i64, ptr %p
   %b = or i64 %x, 42
   %r = insertelement <8 x i64> undef, i64 %b, i32 0
   ret <8 x i64> %r

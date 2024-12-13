@@ -947,6 +947,14 @@ public:
                                    unsigned IVSize, bool IVSigned, bool Ordered,
                                    const DispatchRTInput &DispatchValues);
 
+  /// This is used for non static scheduled types and when the ordered
+  /// clause is present on the loop construct.
+  ///
+  /// \param CGF Reference to current CodeGenFunction.
+  /// \param Loc Clang source location.
+  ///
+  virtual void emitForDispatchDeinit(CodeGenFunction &CGF, SourceLocation Loc);
+
   /// Struct with the values to be passed to the static runtime function
   struct StaticRTInput {
     /// Size of the iteration variable in bits.
@@ -955,9 +963,15 @@ public:
     bool IVSigned = false;
     /// true if loop is ordered, false otherwise.
     bool Ordered = false;
-    /// Address of the output variable in which the flag of the last iteration
-    /// is returned.
+    /// true if kernel is multi-device
+    bool IsMultiDevice = false;
     Address IL = Address::invalid();
+    /// Address of the output variable in which the lower iteration number is
+    /// returned.
+    Address MultiDeviceLB = Address::invalid();
+    /// Address of the output variable in which the upper iteration number is
+    /// returned.
+    Address MultiDeviceUB = Address::invalid();
     /// Address of the output variable in which the lower iteration number is
     /// returned.
     Address LB = Address::invalid();
@@ -975,6 +989,11 @@ public:
                   llvm::Value *Chunk = nullptr)
         : IVSize(IVSize), IVSigned(IVSigned), Ordered(Ordered), IL(IL), LB(LB),
           UB(UB), ST(ST), Chunk(Chunk) {}
+    void setMultiDeviceLBUB(Address LB, Address UB) {
+      MultiDeviceLB = LB;
+      MultiDeviceUB = UB;
+      IsMultiDevice = true;
+    }
   };
   /// Call the appropriate runtime routine to initialize it before start
   /// of loop.
@@ -1005,7 +1024,8 @@ public:
   virtual void emitDistributeStaticInit(CodeGenFunction &CGF,
                                         SourceLocation Loc,
                                         OpenMPDistScheduleClauseKind SchedKind,
-                                        const StaticRTInput &Values);
+                                        const StaticRTInput &Values,
+                                        bool IsMultiDeviceKernel);
 
   /// Call the appropriate runtime routine to notify that we finished
   /// iteration of the ordered loop with the dynamic scheduling.
@@ -1861,6 +1881,14 @@ public:
                            unsigned IVSize, bool IVSigned, bool Ordered,
                            const DispatchRTInput &DispatchValues) override;
 
+  /// This is used for non static scheduled types and when the ordered
+  /// clause is present on the loop construct.
+  ///
+  /// \param CGF Reference to current CodeGenFunction.
+  /// \param Loc Clang source location.
+  ///
+  void emitForDispatchDeinit(CodeGenFunction &CGF, SourceLocation Loc) override;
+
   /// Call the appropriate runtime routine to initialize it before start
   /// of loop.
   ///
@@ -1889,7 +1917,8 @@ public:
   ///
   void emitDistributeStaticInit(CodeGenFunction &CGF, SourceLocation Loc,
                                 OpenMPDistScheduleClauseKind SchedKind,
-                                const StaticRTInput &Values) override;
+                                const StaticRTInput &Values,
+                                bool IsMultiDeviceKernel) override;
 
   /// Call the appropriate runtime routine to notify that we finished
   /// iteration of the ordered loop with the dynamic scheduling.

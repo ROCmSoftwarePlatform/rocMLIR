@@ -424,8 +424,7 @@ hash_code llvm::hash_value(const MachineOperand &MO) {
       const uint32_t *RegMask = MO.getRegMask();
       std::vector<stable_hash> RegMaskHashes(RegMask, RegMask + RegMaskSize);
       return hash_combine(MO.getType(), MO.getTargetFlags(),
-                          stable_hash_combine_array(RegMaskHashes.data(),
-                                                    RegMaskHashes.size()));
+                          stable_hash_combine(RegMaskHashes));
     }
 
     assert(0 && "MachineOperand not associated with any MachineFunction");
@@ -495,7 +494,7 @@ static void printCFIRegister(unsigned DwarfReg, raw_ostream &OS,
     return;
   }
 
-  if (std::optional<unsigned> Reg = TRI->getLLVMRegNum(DwarfReg, true))
+  if (std::optional<MCRegister> Reg = TRI->getLLVMRegNum(DwarfReg, true))
     OS << printReg(*Reg, TRI);
   else
     OS << "<badreg>";
@@ -810,6 +809,21 @@ static void printCFI(raw_ostream &OS, const MCCFIInstruction &CFI,
     OS << ", " << Fields.RegisterSizeInBits << ", ";
     printCFIRegister(Fields.MaskRegister, OS, TRI);
     OS << ", " << Fields.MaskRegisterSizeInBits << ", " << CFI.getOffset();
+    break;
+  }
+  case MCCFIInstruction::OpLLVMVectorRegisterMask: {
+    const auto &Fields =
+        CFI.getExtraFields<MCCFIInstruction::VectorRegisterMaskExtraFields>();
+
+    OS << "llvm_vector_register_mask ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
+    printCFIRegister(CFI.getRegister(), OS, TRI);
+    OS << ", ";
+    printCFIRegister(Fields.SpillRegister, OS, TRI);
+    OS << ", " << Fields.SpillRegisterLaneSizeInBits << ", ";
+    printCFIRegister(Fields.MaskRegister, OS, TRI);
+    OS << ", " << Fields.MaskRegisterSizeInBits;
     break;
   }
   default:

@@ -260,7 +260,10 @@ StringRef TransformMapBuilder::endName(uint32_t dim) {
 }
 
 uint32_t TransformMapBuilder::startIndex(StringRef name) {
-  assert(startIndices.count(name) == 1 && "Key not in starting set of names");
+  if (startIndices.count(name) != 1) {
+    llvm::report_fatal_error(Twine("Key not in starting set of names: ") +
+                             name);
+  }
   return startIndices[name];
 }
 
@@ -292,7 +295,7 @@ void TransformMapBuilder::defineDim(StringRef name, uint32_t dim,
                     "fetching the attribute");
   bool nameInsertResult = endIndices.insert({name, dim}).second;
   assert(nameInsertResult &&
-         "Trying to redife a result name in a coordinate transformation");
+         "Trying to redefine a result name in a coordinate transform");
   SmallString<8> nameCopy = name;
   bool dimInsertResult = endNames.insert({dim, nameCopy}).second;
   assert(dimInsertResult &&
@@ -621,6 +624,11 @@ void TopDownTMBottomDimsWrapper::passThrough(ArrayRef<StringRef> names) {
   b.passThrough(names, toBottomDims(names), names);
 }
 
+void TopDownTMBottomDimsWrapper::passThrough(StringRef outName,
+                                             StringRef inName) {
+  b.passThrough(outName, toBottomDims(outName), inName);
+}
+
 void TopDownTMBottomDimsWrapper::pad(ArrayRef<StringRef> outNames,
                                      ArrayRef<StringRef> inNames,
                                      ArrayRef<int64_t> params) {
@@ -839,6 +847,11 @@ void BottomUpTMTopDimsWrapper::passThrough(ArrayRef<StringRef> names) {
   b.passThrough(names, toTopDims(names), names);
 }
 
+void BottomUpTMTopDimsWrapper::passThrough(StringRef outName,
+                                           StringRef inName) {
+  b.passThrough(outName, toTopDims(outName), inName);
+}
+
 void BottomUpTMTopDimsWrapper::pad(ArrayRef<StringRef> outNames,
                                    ArrayRef<StringRef> inNames,
                                    ArrayRef<int64_t> params) {
@@ -897,7 +910,7 @@ llvm::StringMap<uint32_t> mlir::rock::expandNamesInPlace(
       offset--; // Handle extra count and dropping a dimension
     } else {
       bool insertResult = ret.insert({origName, origIndex + offset}).second;
-      assert(insertResult && "Dimsion already defined by expansion");
+      assert(insertResult && "Dimension already defined by expansion");
     }
   }
   return ret;

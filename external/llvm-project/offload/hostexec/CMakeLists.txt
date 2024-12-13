@@ -26,17 +26,17 @@ else()
 endif()
 
 if(DEFINED HSA_RUNTIME)
-  libomptarget_say("Building hostexec for AMDGCN linked against libhsa")
+  message(STATUS "Building hostexec for AMDGCN linked against libhsa")
   set(HSA_INCLUDE ${LIBOMPTARGET_EXTERNAL_PROJECT_HSA_PATH}/inc)
   set(HOSTEXEC_EXTRA_SOURCE)
   set(HOSTEXEC_DEP_LIBRARIES ${HSA_RUNTIME})
 elseif(${hsa-runtime64_FOUND})
-  libomptarget_say("Building hostexec for AMDGCN linked against libhsa")
+  message(STATUS "Building hostexec for AMDGCN linked against libhsa")
   set(HSA_INCLUDE ${hsa-runtime64_DIR}/../../../include/hsa)
   set(HOSTEXEC_EXTRA_SOURCE)
   set(HOSTEXEC_DEP_LIBRARIES hsa-runtime64::hsa-runtime64)
 else()
-  libomptarget_say("Building hostexec for AMDGCN using dlopen for libhsa")
+  message(STATUS "Building hostexec for AMDGCN using dlopen for libhsa")
   set(HSA_INCLUDE ../plugins-nextgen/amdgpu/dynamic_hsa)
   set(HOSTEXEC_EXTRA_SOURCE ../plugins-nextgen/amdgpu/dynamic_hsa/hsa.cpp)
   set(HOSTEXEC_DEP_LIBRARIES)
@@ -67,6 +67,13 @@ endif()
    add_compile_options($<$<OR:$<COMPILE_LANGUAGE:C>,$<COMPILE_LANGUAGE:CXX>>:-UNDEBUG>)
    set_property(TARGET amdgcn_hostexec_services PROPERTY POSITION_INDEPENDENT_CODE ON)
 
+   option(LIBOMPTARGET_BUILD_DEVICE_FORTRT "Build device fortran IO runtime to use hostexec" OFF)
+   if (LIBOMPTARGET_BUILD_DEVICE_FORTRT)
+     add_compile_definitions(_HOSTEXEC_BUILD_DEVICE_FORTRT)
+     target_link_libraries(amdgcn_hostexec_services FortranDecimal -L${CMAKE_BINARY_DIR}/../../lib  -L${CMAKE_INSTALL_PREFIX}/lib)
+     target_link_libraries(amdgcn_hostexec_services FortranRuntime -L${CMAKE_BINARY_DIR}/../../lib  -L${CMAKE_INSTALL_PREFIX}/lib)
+   endif()
+
 if (LIBOMPTARGET_DEP_CUDA_FOUND)
    list(APPEND HOSTRPC_ARCHS "nvptx")
    add_library(nvptx_hostexec_services STATIC 
@@ -80,7 +87,7 @@ if (LIBOMPTARGET_DEP_CUDA_FOUND)
    )
    set_property(TARGET nvptx_hostexec_services PROPERTY POSITION_INDEPENDENT_CODE ON)
 else()
-   libomptarget_say("Not building hostexec for NVPTX because cuda not found")
+   message(STATUS "Not building hostexec for NVPTX because cuda not found")
 endif()
 
 if(NOT HOSTRPC_ARCHS)
@@ -97,7 +104,7 @@ else()
   return()
 endif()
 
-set(amdgpu_mcpus gfx700 gfx701 gfx801 gfx803 gfx900 gfx902 gfx906 gfx908 gfx90a gfx90c gfx940 gfx941 gfx942 gfx1010 gfx1030 gfx1031 gfx1032 gfx1033 gfx1034 gfx1035 gfx1036 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151)
+set(amdgpu_mcpus gfx700 gfx701 gfx801 gfx803 gfx900 gfx902 gfx906 gfx908 gfx90a gfx90c gfx940 gfx941 gfx942 gfx1010 gfx1030 gfx1031 gfx1032 gfx1033 gfx1034 gfx1035 gfx1036 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1200 gfx1201)
 if (DEFINED LIBOMPTARGET_AMDGCN_GFXLIST)
   set(amdgpu_mcpus ${LIBOMPTARGET_AMDGCN_GFXLIST})
 endif()
@@ -156,8 +163,8 @@ foreach(archname ${HOSTRPC_ARCHS})
    foreach(mcpu ${mcpus})
       if (${archname} STREQUAL "amdgcn")
         find_package(AMDDeviceLibs REQUIRED CONFIG
-                     HINTS ${CMAKE_INSTALL_PREFIX}
-                           ${CMAKE_BINARY_DIR}/../../tools/rocm-device-libs
+		     HINTS ${CMAKE_BINARY_DIR}/../../tools/rocm-device-libs
+                           ${CMAKE_INSTALL_PREFIX}
                      PATHS /opt/rocm
         )
         get_target_property(ocml_path ocml IMPORTED_LOCATION)

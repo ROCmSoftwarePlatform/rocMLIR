@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "OmptCommonDefs.h"
 #include "PluginManager.h"
 #include "device.h"
 #include "omptarget.h"
@@ -626,6 +627,12 @@ EXTERN int omp_target_associate_ptr(const void *HostPtr, const void *DevicePtr,
     FATAL_MESSAGE(DeviceNum, "%s", toString(DeviceOrErr.takeError()).c_str());
 
   void *DeviceAddr = (void *)((uint64_t)DevicePtr + (uint64_t)DeviceOffset);
+
+  OMPT_IF_BUILT(InterfaceRAII(
+      RegionInterface.getCallbacks<ompt_target_data_associate>(), DeviceNum,
+      const_cast<void *>(HostPtr), const_cast<void *>(DevicePtr), Size,
+      __builtin_return_address(0)));
+
   int Rc = DeviceOrErr->getMappingInfo().associatePtr(
       const_cast<void *>(HostPtr), const_cast<void *>(DeviceAddr), Size);
   DP("omp_target_associate_ptr returns %d\n", Rc);
@@ -654,6 +661,11 @@ EXTERN int omp_target_disassociate_ptr(const void *HostPtr, int DeviceNum) {
   if (!DeviceOrErr)
     FATAL_MESSAGE(DeviceNum, "%s", toString(DeviceOrErr.takeError()).c_str());
 
+  OMPT_IF_BUILT(InterfaceRAII(
+      RegionInterface.getCallbacks<ompt_target_data_disassociate>(), DeviceNum,
+      const_cast<void *>(HostPtr),
+      /*DevicePtr=*/nullptr, /*Size=*/0, __builtin_return_address(0)));
+
   int Rc = DeviceOrErr->getMappingInfo().disassociatePtr(
       const_cast<void *>(HostPtr));
   DP("omp_target_disassociate_ptr returns %d\n", Rc);
@@ -668,10 +680,26 @@ EXTERN int omp_is_coarse_grain_mem_region(void *ptr, size_t size) {
     FATAL_MESSAGE(omp_get_default_device(), "%s",
                   toString(DeviceOrErr.takeError()).c_str());
 
-  if (!DeviceOrErr->RTL->query_coarse_grain_mem_region)
-    return 0;
   return DeviceOrErr->RTL->query_coarse_grain_mem_region(
       omp_get_default_device(), ptr, size);
+}
+
+// This user-callable function allows host overlays of HIP mem alloc functions
+// to register memory as coarse grain in the openmp runtime. This will
+// prevent duplicate HSA memory registration when OpenMP sees same memory
+// in map clauses.
+EXTERN void omp_register_coarse_grain_mem(void *ptr, size_t size, int setattr) {
+  if (!(PM->getRequirements() & OMP_REQ_UNIFIED_SHARED_MEMORY))
+    return;
+  auto DeviceOrErr = PM->getDevice(omp_get_default_device());
+  if (!DeviceOrErr)
+    FATAL_MESSAGE(omp_get_default_device(), "%s",
+                  toString(DeviceOrErr.takeError()).c_str());
+
+  bool set_attr = (setattr == 1) ? true : false;
+  DeviceOrErr->RTL->set_coarse_grain_mem(omp_get_default_device(), ptr, size,
+                                         set_attr);
+  return;
 }
 
 EXTERN void *omp_get_mapped_ptr(const void *Ptr, int DeviceNum) {
@@ -685,7 +713,7 @@ EXTERN void *omp_get_mapped_ptr(const void *Ptr, int DeviceNum) {
     return nullptr;
   }
 
-  size_t NumDevices = omp_get_initial_device();
+  int NumDevices = omp_get_initial_device();
   if (DeviceNum == NumDevices) {
     DP("Device %d is initial device, returning Ptr " DPxMOD ".\n",
            DeviceNum, DPxPTR(Ptr));

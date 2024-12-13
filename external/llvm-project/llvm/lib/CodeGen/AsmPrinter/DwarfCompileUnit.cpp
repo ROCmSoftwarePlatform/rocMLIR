@@ -32,6 +32,7 @@
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MCSymbolWasm.h"
 #include "llvm/MC/MachineLocation.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
@@ -41,6 +42,20 @@
 #include <utility>
 
 using namespace llvm;
+
+/// Query value using AddLinkageNamesToDeclCallOriginsForTuning.
+cl::opt<cl::boolOrDefault> AddLinkageNamesToDeclCallOrigins(
+    "add-linkage-names-to-declaration-call-origins", cl::Hidden,
+    cl::desc("Add DW_AT_linkage_name to function declaration DIEs "
+             "referenced by DW_AT_call_origin attributes. Enabled by default "
+             "for -gsce debugger tuning."));
+
+static bool AddLinkageNamesToDeclCallOriginsForTuning(const DwarfDebug *DD) {
+  bool EnabledByDefault = DD->tuneForSCE();
+  if (EnabledByDefault)
+    return AddLinkageNamesToDeclCallOrigins != cl::boolOrDefault::BOU_FALSE;
+  return AddLinkageNamesToDeclCallOrigins == cl::boolOrDefault::BOU_TRUE;
+}
 
 static dwarf::Tag GetCompileUnitType(UnitKind Kind, DwarfDebug *DW) {
 
@@ -332,6 +347,14 @@ void DwarfCompileUnit::addLocationAttribute(
         }
       }
       DwarfExpr->addFragmentOffset(Expr);
+
+      if (auto NewElementsRef = Expr->getNewElementsRef()) {
+        SmallVector<DbgValueLocEntry> ArgLocEntries;
+        if (Global)
+          ArgLocEntries.emplace_back(Global);
+        DwarfExpr->addExpression(*NewElementsRef, ArgLocEntries);
+        continue;
+      }
     }
 
     // FIXME: This is a workaround to avoid generating symbols for non-global
@@ -415,8 +438,9 @@ void DwarfCompileUnit::addLocationAttribute(
                 Asm->getObjFileLowering().getIndirectSymViaRWPI(Sym));
         // Base register
         Register BaseReg = Asm->getObjFileLowering().getStaticBase();
-        BaseReg = Asm->TM.getMCRegisterInfo()->getDwarfRegNum(BaseReg, false);
-        addUInt(*Loc, dwarf::DW_FORM_data1, dwarf::DW_OP_breg0 + BaseReg);
+        unsigned DwarfBaseReg =
+            Asm->TM.getMCRegisterInfo()->getDwarfRegNum(BaseReg, false);
+        addUInt(*Loc, dwarf::DW_FORM_data1, dwarf::DW_OP_breg0 + DwarfBaseReg);
         // Offset from base register
         addSInt(*Loc, dwarf::DW_FORM_sdata, 0);
         // Operation
@@ -796,7 +820,7 @@ void DwarfCompileUnit::attachRangesOrLowHighPC(
     // the order of blocks will be frozen beyond this point.
     do {
       if (MBB->sameSection(EndMBB) || MBB->isEndSection()) {
-        auto MBBSectionRange = Asm->MBBSectionRanges[MBB->getSectionIDNum()];
+        auto MBBSectionRange = Asm->MBBSectionRanges[MBB->getSectionID()];
         List.push_back(
             {MBB->sameSection(BeginMBB) ? BeginLabel
                                         : MBBSectionRange.BeginLabel,
@@ -890,6 +914,8 @@ DIE *DwarfCompileUnit::constructVariableDIE(DbgVariable &DV, bool Abstract) {
 void DwarfCompileUnit::applyConcreteDbgVariableAttributes(
     const Loc::Single &Single, const DbgVariable &DV, DIE &VariableDie) {
   const DbgValueLoc *DVal = &Single.getValueLoc();
+  const DIExpression *Expr = Single.getExpr();
+
   if (!DVal->isVariadic()) {
     const DbgValueLocEntry *Entry = DVal->getLocEntries().begin();
     if (Entry->isLocation()) {
@@ -929,13 +955,22 @@ void DwarfCompileUnit::applyConcreteDbgVariableAttributes(
         return Entry.isLocation() && !Entry.getLoc().getReg();
       }))
     return;
-  const DIExpression *Expr = Single.getExpr();
   assert(Expr && "Variadic Debug Value must have an Expression.");
   DIELoc *Loc = new (DIEValueAllocator) DIELoc;
+
   DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
   DwarfExpr.addFragmentOffset(Expr);
-  DIExpressionCursor Cursor(Expr);
   const TargetRegisterInfo &TRI = *Asm->MF->getSubtarget().getRegisterInfo();
+
+  if (Expr) {
+    if (auto NewElementsRef = Expr->getNewElementsRef()) {
+      DwarfExpr.addExpression(*NewElementsRef, DVal->getLocEntries(), &TRI);
+      addBlock(VariableDie, dwarf::DW_AT_location, DwarfExpr.finalize());
+      return;
+    }
+  }
+
+  DIExpressionCursor Cursor(Expr);
 
   auto AddEntry = [&](const DbgValueLocEntry &Entry,
                       DIExpressionCursor &Cursor) {
@@ -1002,6 +1037,15 @@ void DwarfCompileUnit::applyConcreteDbgVariableAttributes(const Loc::MMI &MMI,
   std::optional<unsigned> NVPTXAddressSpace;
   DIELoc *Loc = new (DIEValueAllocator) DIELoc;
   DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
+  auto PoisonedExpr =
+      find_if(MMI.getFrameIndexExprs(), [](const auto &Fragment) {
+        return Fragment.Expr->holdsOldElements() && Fragment.Expr->isPoisoned();
+      });
+  if (PoisonedExpr != MMI.getFrameIndexExprs().end()) {
+    DwarfExpr.addExpression(PoisonedExpr->Expr);
+    addBlock(VariableDie, dwarf::DW_AT_location, DwarfExpr.finalize());
+    return;
+  }
   for (const auto &Fragment : MMI.getFrameIndexExprs()) {
     Register FrameReg;
     const DIExpression *Expr = Fragment.Expr;
@@ -1011,6 +1055,22 @@ void DwarfCompileUnit::applyConcreteDbgVariableAttributes(const Loc::MMI &MMI,
     DwarfExpr.addFragmentOffset(Expr);
 
     auto *TRI = Asm->MF->getSubtarget().getRegisterInfo();
+
+    if (Expr->holdsNewElements()) {
+      // TODO: support frame symbol
+      assert(!Asm->getFunctionFrameSymbol());
+      SmallVector<DbgValueLocEntry> ArgLocEntries;
+      if (FrameReg)
+        ArgLocEntries.push_back({MachineLocation{FrameReg}});
+      else
+        ArgLocEntries.push_back({int64_t{0}});
+      DIExpression *UpdatedExpr =
+          TFI->lowerFIArgToFPArg(*Asm->MF, Expr, /*ArgIndex=*/0u, Offset);
+      DwarfExpr.addExpression(*UpdatedExpr->getNewElementsRef(), ArgLocEntries,
+                              TRI);
+      continue;
+    }
+
     SmallVector<uint64_t, 8> Ops;
     TRI->getOffsetOpcodes(Offset, Ops);
 
@@ -1403,6 +1463,12 @@ DIE &DwarfCompileUnit::constructCallSiteEntryDIE(DIE &ScopeDIE,
   } else {
     DIE *CalleeDIE = getOrCreateSubprogramDIE(CalleeSP);
     assert(CalleeDIE && "Could not create DIE for call site entry origin");
+    if (AddLinkageNamesToDeclCallOriginsForTuning(DD) &&
+        !CalleeSP->isDefinition() &&
+        !CalleeDIE->findAttribute(dwarf::DW_AT_linkage_name)) {
+      addLinkageName(*CalleeDIE, CalleeSP->getLinkageName());
+    }
+
     addDIEEntry(CallSiteDIE, getDwarf5OrGNUAttr(dwarf::DW_AT_call_origin),
                 *CalleeDIE);
   }
@@ -1661,8 +1727,8 @@ void DwarfCompileUnit::addGlobalNameForTypeUnit(StringRef Name,
 }
 
 /// Add a new global type to the unit.
-void DwarfCompileUnit::addGlobalType(const DIType *Ty, const DIE &Die,
-                                     const DIScope *Context) {
+void DwarfCompileUnit::addGlobalTypeImpl(const DIType *Ty, const DIE &Die,
+                                         const DIScope *Context) {
   if (!hasDwarfPubSections())
     return;
   std::string FullName = getParentContextString(Context) + Ty->getName().str();

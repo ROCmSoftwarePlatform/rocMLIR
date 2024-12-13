@@ -8,6 +8,7 @@
 
 #include "mlir/Dialect/Rock/utility/loweringUtils.h"
 #include "mlir/Dialect/Rock/utility/AmdArchDb.h"
+#include "mlir/Dialect/Rock/utility/builderUtils.h"
 #include "mlir/Dialect/Rock/utility/transformMapUtils.h"
 
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
@@ -21,6 +22,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormatVariadic.h"
 
+#include "llvm/Support/Debug.h"
 using namespace mlir;
 using namespace mlir::rock;
 
@@ -69,6 +71,10 @@ LogicalResult mlir::rock::calculateKBlockNum(const int64_t batchSize,
 
   int64_t gemmKBlock = 1;
 
+  assert(gemmM > 0 && gemmN > 0 && gemmK > 0);
+  assert(MPerBlock > 0 && NPerBlock > 0 && KPerBlock > 0 && KPack > 0 &&
+         batchSize > 0);
+
   if ((gemmM % MPerBlock != 0) || (gemmN % NPerBlock != 0) ||
       (gemmK % (KPerBlock * KPack) != 0))
     return failure();
@@ -99,28 +105,25 @@ LogicalResult mlir::rock::calculateKBlockNum(const int64_t batchSize,
 }
 
 SmallVector<int64_t>
-mlir::rock::backwardDataKernelIds(int64_t strideHeight, int64_t strideWidth,
-                                  int64_t dilationHeight, int64_t dilationWidth,
-                                  int64_t filterHeight, int64_t filterWidth) {
-  int64_t gcdStrideDilationH = math_util::gcd(strideHeight, dilationHeight);
-  int64_t gcdStrideDilationW = math_util::gcd(strideWidth, dilationWidth);
+mlir::rock::backwardDataKernelIds(ArrayRef<int64_t> strideDims,
+                                  ArrayRef<int64_t> dilationDims,
+                                  ArrayRef<int64_t> filterDims) {
+  assert(strideDims.size() == dilationDims.size());
+  SmallVector<int64_t, 5> gcdStrideDilations;
+  for (const auto &[stride, dilation] : zip(strideDims, dilationDims))
+    gcdStrideDilations.push_back(math_util::gcd(stride, dilation));
 
-  int64_t yTilda = strideHeight / gcdStrideDilationH;
-  int64_t xTilda = strideWidth / gcdStrideDilationW;
-
-  int64_t y = filterHeight;
-  int64_t x = filterWidth;
+  SmallVector<int64_t, 5> filTilda;
+  for (const auto &[stride, gcdSD] : zip(strideDims, gcdStrideDilations))
+    filTilda.push_back(stride / gcdSD);
 
   // Heuristic to determine if every pixel in the output would be written by the
   // backward data convolution algorithm.
   auto isEveryPixelWritten = [&]() -> bool {
     bool result = true;
-    for (int32_t dim = 0; dim < 2; ++dim) {
-      int64_t convStride = (dim == 0) ? strideHeight : strideWidth;
-      int64_t convDilation = (dim == 0) ? dilationHeight : dilationWidth;
-      int64_t filterSize = (dim == 0) ? filterHeight : filterWidth;
-
-      if (!(convDilation == 1 && convStride <= filterSize))
+    for (const auto &[stride, dilation, filterSize] :
+         zip(strideDims, dilationDims, filterDims)) {
+      if (!(dilation == 1 && stride <= filterSize))
         result = false;
     }
     return result;
@@ -133,18 +136,42 @@ mlir::rock::backwardDataKernelIds(int64_t strideHeight, int64_t strideWidth,
 
   // Populate the kernel IDs according to the current backward data convolution
   // algorithm implementation.
-  for (int64_t kernelId = 0; kernelId < yTilda * xTilda; ++kernelId) {
+  int64_t subproduct = 1;
+  int64_t product;
+  for (size_t i = 1; i < filterDims.size(); i++)
+    subproduct *= filTilda[i];
+  product = subproduct * filTilda[0];
+  for (int64_t kernelId = 0; kernelId < product; ++kernelId) {
     // gemmK size is different for each GEMM
-    const int64_t iYTilda = kernelId / xTilda;
-    const int64_t iXTilda = kernelId % xTilda;
+    SmallVector<int64_t, 3> iTilda;
+    SmallVector<int64_t, 3> iDotSlice;
+    int64_t divisor = 1;
+    iTilda.resize(filterDims.size());
+    switch (filterDims.size()) {
+    default:
+      llvm_unreachable("Only 2-D and 3-D have been implemented.");
+      break;
+    case 3:
+      divisor = filTilda[2];
+      iTilda[2] = kernelId % divisor;
+      [[fallthrough]];
+    case 2:
+      iTilda[1] = (kernelId % subproduct) / divisor;
+      iTilda[0] = kernelId / subproduct;
+    }
+    for (size_t i = 0; i < filterDims.size(); i++)
+      iDotSlice.push_back(math_util::integer_divide_ceil(
+          filterDims[i] - iTilda[i], filTilda[i]));
 
-    int64_t yDotSlice = math_util::integer_divide_ceil(y - iYTilda, yTilda);
-    int64_t xDotSlice = math_util::integer_divide_ceil(x - iXTilda, xTilda);
     // gemmK must > 0, otherwise not need to run
-    if (yDotSlice * xDotSlice > 0) {
+    int64_t gemmKproduct = 1;
+    for (int64_t ds : iDotSlice)
+      gemmKproduct *= ds;
+    if (gemmKproduct > 0) {
       kernelIds.push_back(kernelId);
     }
   }
+
   return kernelIds;
 }
 
@@ -193,7 +220,7 @@ FailureOr<RegsAsMatrixSubTiles> mlir::rock::getLoadRegsAsTileViews(
   StringRef thisBlockDim = dName == "m" ? "m_block" : "n_block";
   StringRef otherBlockDim = dName == "m" ? "n_block" : "m_block";
 
-  MemRefType matrixType = globalBuffer.getType().cast<MemRefType>();
+  MemRefType matrixType = cast<MemRefType>(globalBuffer.getType());
   ArrayRef<int64_t> matrixShape = matrixType.getShape();
   int64_t kGlobal = matrixShape[1];
   int64_t dGlobal = matrixShape[2];
@@ -238,30 +265,26 @@ FailureOr<RegsAsMatrixSubTiles> mlir::rock::getLoadRegsAsTileViews(
     gpuViews.gridSubTile = b.getArrayAttr({splitIdAttr, toGlobalIdxAttr});
   }
   {
-    TopDownTMBuilder blockwiseSplitId(b, {"tid", "iter"},
-                                      {blockSize, dataPerThread}, loc);
-    makeLoadRegsTidMerge(blockwiseSplitId, dThreadName, dThreads, kThreads,
-                         {0, 1}, isKContigousDim);
-    makeLoadRegsIterMerge(blockwiseSplitId, dIterName, dPerThread, kPerThread,
-                          {2, 3}, isKContigousDim);
-    TransformMapAttr splitIdAttr = blockwiseSplitId.get();
-    auto toGlobalIdx = TopDownTMBuilder::below(blockwiseSplitId, splitIdAttr);
-    toGlobalIdx.unmerge("k", 0, {"k_thread", "k_iter"}, {kThreads, kPerThread});
-    toGlobalIdx.unmerge(dName, 1, {dThreadName, dIterName},
-                        {dThreads, dPerThread});
-    TransformMapAttr toGlobalIdxAttr = toGlobalIdx.get();
-    gpuViews.blockSubTile = b.getArrayAttr({splitIdAttr, toGlobalIdxAttr});
+    StringSet<> dimensionsToRemove{"k_loop", bidGridOrder[0], bidGridOrder[1],
+                                   bidGridOrder[2]};
+    FailureOr<ArrayAttr> maybeBlockSubTile =
+        removeUpperDims(b, gpuViews.gridSubTile, dimensionsToRemove);
+
+    if (failed(maybeBlockSubTile)) {
+      return failure();
+    }
+    gpuViews.blockSubTile = maybeBlockSubTile.value();
   }
   {
-    TopDownTMBuilder threadwiseSplitId(b, {"iter"}, {dataPerThread}, loc);
-    makeLoadRegsIterMerge(threadwiseSplitId, dIterName, dPerThread, kPerThread,
-                          {0, 1}, isKContigousDim);
-    TransformMapAttr splitIdAttr = threadwiseSplitId.get();
-    auto toGlobalIdx = TopDownTMBuilder::below(threadwiseSplitId, splitIdAttr);
-    toGlobalIdx.passThrough({"k"}, 0, {"k_iter"});
-    toGlobalIdx.passThrough({dName}, 1, {dIterName});
-    TransformMapAttr toGlobalIdxAttr = toGlobalIdx.get();
-    gpuViews.threadSubTile = b.getArrayAttr({splitIdAttr, toGlobalIdxAttr});
+    StringSet<> dimensionsToRemove{"k_loop", bidGridOrder[0], bidGridOrder[1],
+                                   bidGridOrder[2], "tid"};
+    FailureOr<ArrayAttr> maybeThreadSubTile =
+        removeUpperDims(b, gpuViews.gridSubTile, dimensionsToRemove);
+
+    if (failed(maybeThreadSubTile)) {
+      return failure();
+    }
+    gpuViews.threadSubTile = maybeThreadSubTile.value();
   }
   return gpuViews;
 }
@@ -278,7 +301,7 @@ FailureOr<RegsAsMatrixSubTiles> mlir::rock::getPackedRegsAsTileViews(
   StringRef thisBlockDim = dName == "m" ? "m_block" : "n_block";
   StringRef otherBlockDim = dName == "m" ? "n_block" : "m_block";
 
-  MemRefType matrixType = globalBuffer.getType().cast<MemRefType>();
+  MemRefType matrixType = cast<MemRefType>(globalBuffer.getType());
   ArrayRef<int64_t> matrixShape = matrixType.getShape();
   int64_t kGlobal = matrixShape[1];
   int64_t dGlobal = matrixShape[2];
@@ -319,49 +342,40 @@ FailureOr<RegsAsMatrixSubTiles> mlir::rock::getPackedRegsAsTileViews(
     toGlobalIdx.unmerge(
         "k", 1, {"k_loop", "k_thread", "kouterPerThread", "kpackPerThread"},
         {kGlobal / kPerBlock, kThreads, kOuterPerThread, kpackPerThread});
-    toGlobalIdx.unmerge(dName, 2, {thisBlockDim, dThreadName, dIterName},
-                        {dGlobal / dPerBlock, dThreads, dPerThread});
+    // if the matrix is KxD swap the iter/thread dimension. This is so that
+    // each thread writes in LDS contiguously, minimizing bank conflicts
+    if (!doSwapThreadIterSubDimsForD)
+      toGlobalIdx.unmerge(dName, 2, {thisBlockDim, dThreadName, dIterName},
+                          {dGlobal / dPerBlock, dThreads, dPerThread});
+    else
+      toGlobalIdx.unmerge(dName, 2, {thisBlockDim, dIterName, dThreadName},
+                          {dGlobal / dPerBlock, dPerThread, dThreads});
+
     toGlobalIdx.ignore(otherBlockDim);
     TransformMapAttr toGlobalIdxAttr = toGlobalIdx.get();
     gpuViews.gridSubTile = b.getArrayAttr({splitIdAttr, toGlobalIdxAttr});
   }
   {
-    TopDownTMBuilder blockwiseSplitId(b, {"tid", "iter"},
-                                      {blockSize, dataPerThread}, loc);
-    makeLoadRegsTidMerge(blockwiseSplitId, dThreadName, dThreads, kThreads,
-                         {0, 1}, isKContigousDim);
-    blockwiseSplitId.merge({"kouterPerThread", dIterName, "kpackPerThread"},
-                           {2, 3, 4}, "iter",
-                           {kOuterPerThread, dPerThread, kpackPerThread});
-    TransformMapAttr splitIdAttr = blockwiseSplitId.get();
-    auto toGlobalIdx = TopDownTMBuilder::below(blockwiseSplitId, splitIdAttr);
-    toGlobalIdx.unmerge("k", 0,
-                        {"k_thread", "kouterPerThread", "kpackPerThread"},
-                        {kThreads, kOuterPerThread, kpackPerThread});
-    // if the matrix is KxD swap the iter/thread dimension. This is so that
-    // each thread writes in LDS contiguously, minimizing bank conflicts
-    if (!doSwapThreadIterSubDimsForD)
-      toGlobalIdx.unmerge(dName, 1, {dThreadName, dIterName},
-                          {dThreads, dPerThread});
-    else
-      toGlobalIdx.unmerge(dName, 1, {dIterName, dThreadName},
-                          {dPerThread, dThreads});
+    StringSet<> dimensionsToRemove{"k_loop", bidGridOrder[0], bidGridOrder[1],
+                                   bidGridOrder[2]};
+    FailureOr<ArrayAttr> maybeBlockSubTile =
+        removeUpperDims(b, gpuViews.gridSubTile, dimensionsToRemove);
 
-    TransformMapAttr toGlobalIdxAttr = toGlobalIdx.get();
-    gpuViews.blockSubTile = b.getArrayAttr({splitIdAttr, toGlobalIdxAttr});
+    if (failed(maybeBlockSubTile)) {
+      return failure();
+    }
+    gpuViews.blockSubTile = maybeBlockSubTile.value();
   }
   {
-    TopDownTMBuilder threadwiseSplitId(b, {"iter"}, {dataPerThread}, loc);
-    threadwiseSplitId.merge({"kouterPerThread", dIterName, "kpackPerThread"},
-                            {0, 1, 2}, "iter",
-                            {kOuterPerThread, dPerThread, kpackPerThread});
-    TransformMapAttr splitIdAttr = threadwiseSplitId.get();
-    auto toGlobalIdx = TopDownTMBuilder::below(threadwiseSplitId, splitIdAttr);
-    toGlobalIdx.unmerge("k", 0, {"kouterPerThread", "kpackPerThread"},
-                        {kOuterPerThread, kpackPerThread});
-    toGlobalIdx.passThrough({dName}, 1, {dIterName});
-    TransformMapAttr toGlobalIdxAttr = toGlobalIdx.get();
-    gpuViews.threadSubTile = b.getArrayAttr({splitIdAttr, toGlobalIdxAttr});
+    StringSet<> dimensionsToRemove{"k_loop", bidGridOrder[0], bidGridOrder[1],
+                                   bidGridOrder[2], "tid"};
+    FailureOr<ArrayAttr> maybeThreadSubTile =
+        removeUpperDims(b, gpuViews.gridSubTile, dimensionsToRemove);
+
+    if (failed(maybeThreadSubTile)) {
+      return failure();
+    }
+    gpuViews.threadSubTile = maybeThreadSubTile.value();
   }
   return gpuViews;
 }
@@ -369,7 +383,7 @@ FailureOr<RegsAsMatrixSubTiles> mlir::rock::getPackedRegsAsTileViews(
 Value mlir::rock::normalizeMatrix(Value matrix, OpBuilder &b, Location loc,
                                   bool doTranspose, StringRef firstDim,
                                   StringRef secondDim) {
-  auto matrixType = matrix.getType().cast<MemRefType>();
+  auto matrixType = cast<MemRefType>(matrix.getType());
   bool addGroup = matrixType.getShape().size() != 3;
   if (!addGroup && !doTranspose)
     return matrix;
@@ -397,7 +411,7 @@ Value mlir::rock::padMatrix(Value matrix, OpBuilder &b, Location loc,
                             StringRef secondDim, int64_t secondDimPad) {
   if (firstDimPad == 0 && secondDimPad == 0)
     return matrix;
-  ArrayRef<int64_t> shape = matrix.getType().cast<MemRefType>().getShape();
+  ArrayRef<int64_t> shape = cast<MemRefType>(matrix.getType()).getShape();
   BottomUpTMBuilder padder(b, {"gemmG", firstDim, secondDim}, shape, loc);
   padder.passThrough("gemmG");
   if (firstDimPad == 0) {
@@ -431,33 +445,24 @@ TopDownTMBuilder mlir::rock::swapThreadIdAndIteration(
   {
     unsigned int idx = 0;
     if (!isBlockwise) {
-      splitAgain.passThrough("gemmG");
-      idx += 1;
-    }
-
-    if (!doSwapThreadIterSubDimsForM) {
-      splitAgain.passThrough({"gemmM"}, {idx}, {"gemmM"});
-      idx += 1;
-    } else if (isBlockwise) {
-      splitAgain.merge({"m_iter", "m_tid"}, {idx, idx + 1}, "gemmM",
-                       {copyMPerThread, mPerBlock / copyMPerThread});
-      idx += 2;
-    } else {
-      splitAgain.merge({"m_block", "m_iter", "m_tid"}, {idx, idx + 1, idx + 2},
-                       "gemmM",
-                       {mBlocks, copyMPerThread, mPerBlock / copyMPerThread});
+      splitAgain.passThrough({"g_block", "m_block", "n_block"});
       idx += 3;
     }
 
+    if (!doSwapThreadIterSubDimsForM) {
+      splitAgain.passThrough({"gemmBlockM"}, {idx}, {"gemmBlockM"});
+      idx += 1;
+    } else {
+      splitAgain.merge({"m_iter", "m_tid"}, {idx, idx + 1}, "gemmBlockM",
+                       {copyMPerThread, mPerBlock / copyMPerThread});
+      idx += 2;
+    }
+
     if (!doSwapThreadIterSubDimsForN)
-      splitAgain.passThrough({"gemmN"}, {idx}, {"gemmN"});
-    else if (isBlockwise)
-      splitAgain.merge({"n_iter", "n_tid"}, {idx, idx + 1}, "gemmN",
-                       {copyNPerThread, nPerBlock / copyNPerThread});
+      splitAgain.passThrough({"gemmBlockN"}, {idx}, {"gemmBlockN"});
     else
-      splitAgain.merge({"n_block", "n_iter", "n_tid"}, {idx, idx + 1, idx + 2},
-                       "gemmN",
-                       {nBlocks, copyNPerThread, nPerBlock / copyNPerThread});
+      splitAgain.merge({"n_iter", "n_tid"}, {idx, idx + 1}, "gemmBlockN",
+                       {copyNPerThread, nPerBlock / copyNPerThread});
   }
   TransformMapAttr splitAgainAttr = splitAgain.get();
   transformAttr.push_back(splitAgainAttr);
@@ -466,37 +471,46 @@ TopDownTMBuilder mlir::rock::swapThreadIdAndIteration(
   {
     unsigned int idx = 0;
     if (!isBlockwise) {
-      swapBack.passThrough("gemmG");
-      idx = 1;
+      swapBack.passThrough({"g_block", "m_block", "n_block"});
+      idx = 3;
     }
 
     if (!doSwapThreadIterSubDimsForM)
-      swapBack.passThrough({"gemmM"}, {idx}, {"gemmM"});
-    else if (isBlockwise)
-      swapBack.unmerge("gemmM", idx, {"m_tid", "m_iter"},
-                       {mPerBlock / copyMPerThread, copyMPerThread});
+      swapBack.passThrough({"gemmBlockM"}, {idx}, {"gemmBlockM"});
     else
-      swapBack.unmerge("gemmM", idx, {"m_block", "m_tid", "m_iter"},
-                       {mBlocks, mPerBlock / copyMPerThread, copyMPerThread});
+      swapBack.unmerge("gemmBlockM", idx, {"m_tid", "m_iter"},
+                       {mPerBlock / copyMPerThread, copyMPerThread});
+    idx += 1;
 
     if (!doSwapThreadIterSubDimsForN)
-      swapBack.passThrough({"gemmN"}, {idx + 1}, {"gemmN"});
-    else if (isBlockwise)
-      swapBack.unmerge("gemmN", idx + 1, {"n_tid", "n_iter"},
-                       {nPerBlock / copyNPerThread, copyNPerThread});
+      swapBack.passThrough({"gemmBlockN"}, {idx}, {"gemmBlockN"});
     else
-      swapBack.unmerge("gemmN", idx + 1, {"n_block", "n_tid", "n_iter"},
-                       {nBlocks, nPerBlock / copyNPerThread, copyNPerThread});
+      swapBack.unmerge("gemmBlockN", idx, {"n_tid", "n_iter"},
+                       {nPerBlock / copyNPerThread, copyNPerThread});
   }
   TransformMapAttr swapBackAttr = swapBack.get();
   transformAttr.push_back(swapBackAttr);
 
-  return swapBack;
+  auto finalUnmerge = TopDownTMBuilder::below(swapBack, swapBackAttr);
+  if (!isBlockwise) {
+    finalUnmerge.passThrough({"gemmG"}, {0}, {"g_block"});
+    finalUnmerge.unmerge("gemmM", 1, {"m_block", "gemmBlockM"},
+                         {mBlocks, mPerBlock});
+    finalUnmerge.unmerge("gemmN", 2, {"n_block", "gemmBlockN"},
+                         {nBlocks, nPerBlock});
+  } else {
+    finalUnmerge.passThrough({"gemmM"}, {0}, {"gemmBlockM"});
+    finalUnmerge.passThrough({"gemmN"}, {1}, {"gemmBlockN"});
+  }
+  TransformMapAttr finalUnmergeAttr = finalUnmerge.get();
+  transformAttr.push_back(finalUnmergeAttr);
+
+  return finalUnmerge;
 }
 
 Value mlir::rock::createSliceOfFirstDim(PatternRewriter &rewriter, Location loc,
                                         Value buffer, Value sliceIdx) {
-  MemRefType bufType = buffer.getType().cast<MemRefType>();
+  MemRefType bufType = cast<MemRefType>(buffer.getType());
   ArrayRef<int64_t> originalShape = bufType.getShape().slice(1);
   int64_t mbMemRefTypeRank = bufType.getRank();
   IntegerAttr zero = rewriter.getIndexAttr(0);
@@ -558,6 +572,23 @@ FailureOr<rock::GpuAllocOp> mlir::rock::findGpuAlloc(Value value) {
 
 FailureOr<memref::AllocOp> mlir::rock::findMemrefAlloc(Value value) {
   return findAlloc<memref::AllocOp>(value);
+}
+
+FailureOr<BlockArgument> findBlockArgument(Value value) {
+  auto maybeBlockArg = dyn_cast_or_null<BlockArgument>(value);
+  while (!maybeBlockArg) {
+    // Keep going until the operation that defines the value is a
+    // view-like operation
+    if (auto viewOp =
+            dyn_cast_or_null<ViewLikeOpInterface>(value.getDefiningOp())) {
+      value = viewOp.getViewSource();
+    } else {
+      return failure();
+    }
+    maybeBlockArg = dyn_cast_or_null<BlockArgument>(value);
+  }
+
+  return maybeBlockArg;
 }
 
 std::optional<int64_t> mlir::rock::computeConstDiff(Value l, Value u) {
@@ -706,6 +737,10 @@ FailureOr<IntegerAttr> mlir::rock::getGridSize(Operation *op) {
   return getAttrFromOpOrParents<IntegerAttr>(op, "grid_size");
 }
 
+FailureOr<IntegerAttr> mlir::rock::getBlockSize(Operation *op) {
+  return getAttrFromOpOrParents<IntegerAttr>(op, "block_size");
+}
+
 AffineMap mlir::rock::getIdxReversalMap(OpBuilder &b) {
   auto dimExpr = mlir::getAffineDimExpr(0, b.getContext());
   auto dimSizeExpr = mlir::getAffineSymbolExpr(0, b.getContext());
@@ -721,18 +756,115 @@ mlir::rock::getReassociationForFlattening(ShapedType srcTp) {
   return reassociation;
 }
 
-SmallVector<mhal::PrefillAttr>
-mlir::rock::getStoredPrefillAttributes(mlir::LLVM::LLVMFuncOp func) {
-  SmallVector<mhal::PrefillAttr> storedAttrs;
-  auto gpuModule = cast<gpu::GPUModuleOp>(func->getParentOp());
-  if (auto moduleAttr = gpuModule->getAttr(func.getSymName())) {
-    if (auto arrayAttr = dyn_cast<ArrayAttr>(moduleAttr)) {
-      for (auto attr : arrayAttr) {
-        if (auto prefillAttr = dyn_cast<mhal::PrefillAttr>(attr)) {
-          storedAttrs.push_back(prefillAttr);
-        }
+TypedValue<MemRefType> mlir::rock::viewBufferAs(OpBuilder &b, Value buffer,
+                                                Type type) {
+  Location loc = buffer.getLoc();
+  Value zeroByteOffset = b.createOrFold<arith::ConstantIndexOp>(loc, 0);
+  auto bufferType = cast<MemRefType>(buffer.getType());
+  int64_t byteWidth = getByteWidth(type);
+  int64_t numBytes = bufferType.getShape()[0];
+  assert(numBytes % byteWidth == 0 && "Can't evenly fit type into buffer");
+  int64_t length = numBytes / byteWidth;
+  auto newBufferType = bufferType.cloneWith({length}, type);
+  auto view =
+      b.create<memref::ViewOp>(loc, newBufferType, buffer, zeroByteOffset,
+                               /*dynamic dim sizes=*/ValueRange{});
+  return TypedValue<MemRefType>(view.getResult());
+}
+
+Value mlir::rock::gpuAlloc(OpBuilder &b, Location loc, int64_t bufferDim,
+                           Type elementType,
+                           gpu::AddressSpace memoryAddressSpace) {
+  auto memoryAddressSpaceAttr =
+      b.getAttr<gpu::AddressSpaceAttr>(memoryAddressSpace);
+
+  // Note: we don't need to create views for register buffers, since those won't
+  // have real memory accesses at the end of the day. This is important when
+  // dealing with booleans and sub-byte types.
+  if (memoryAddressSpace == gpu::AddressSpace::Private) {
+    auto memType = MemRefType::get({bufferDim}, elementType, AffineMap{},
+                                   memoryAddressSpaceAttr);
+    return b.create<GpuAllocOp>(loc, memType);
+  }
+  auto rawMemType =
+      MemRefType::get({bufferDim * getByteWidth(elementType)}, b.getI8Type(),
+                      AffineMap{}, memoryAddressSpaceAttr);
+  auto buffer = b.create<GpuAllocOp>(loc, rawMemType);
+
+  return viewBufferAs(b, buffer, elementType);
+}
+
+LogicalResult mlir::rock::checkLDSSize(StringAttr arch, int64_t ldsBytes) {
+  // Check for arch limitations exceede
+  const int64_t ldsSize = rock::lookupArchInfo(arch).maxSharedMemPerWG;
+  return success(ldsBytes <= ldsSize);
+}
+
+// Trace an arg back to its alloc.
+static void traceGemmAllocToArgs(memref::AllocOp buffer,
+                                 const BufferDependencyAnalysis &deps,
+                                 SmallVector<BlockArgument> &args) {
+  IRRewriter rewriter(buffer.getContext());
+  std::optional<llvm::SmallVector<OpOperand *>> readersOperands =
+      deps.getReaders(buffer);
+  if (!readersOperands.has_value())
+    return;
+  for (OpOperand *readerOperand : readersOperands.value()) {
+    auto readOp = dyn_cast<MemoryEffectOpInterface>(readerOperand->getOwner());
+    if (!readOp)
+      continue;
+
+    SmallVector<MemoryEffects::EffectInstance> effects;
+    readOp.getEffects(effects);
+    for (const MemoryEffects::EffectInstance &effect : effects) {
+      OpOperand *writerOperand = effect.getEffectValue<OpOperand *>();
+      // Test against the write operand to guard against [MemRead, MemWrite]
+      if (writerOperand && readerOperand != writerOperand &&
+          isa<MemoryEffects::Write>(effect.getEffect())) {
+        Value writerOperandValue = writerOperand->get();
+        if (auto blockArg = dyn_cast<BlockArgument>(writerOperandValue))
+          args.push_back(blockArg);
+        else if (memref::AllocOp writeBuffer = dyn_cast<memref::AllocOp>(
+                     writerOperandValue.getDefiningOp()))
+          traceGemmAllocToArgs(writeBuffer, deps, args);
       }
     }
   }
-  return storedAttrs;
+}
+
+FailureOr<SmallVector<BlockArgument>>
+mlir::rock::traceGemmOutputToArgs(Value matC, func::FuncOp func,
+                                  OpBuilder &builder,
+                                  const BufferDependencyAnalysis &deps) {
+  if (func.getNumArguments() == 0)
+    return failure();
+
+  SmallVector<BlockArgument> args;
+  auto funcArgs = func.getArguments();
+  // check if matC is a kernel argument
+  for (auto arg : funcArgs) {
+    if (findBlockArgument(matC) == arg)
+      args.push_back(arg);
+  }
+  assert(args.empty() || args.size() == 1);
+  if (!args.empty())
+    return args;
+
+  // trace matC to its alloc
+  FailureOr<memref::AllocOp> allocOp = findMemrefAlloc(matC);
+  if (failed(allocOp))
+    return failure();
+
+  // trace gemm alloc to arg
+  traceGemmAllocToArgs(allocOp.value(), deps, args);
+  for (auto arg : args) {
+    bool containsArg =
+        std::find(funcArgs.begin(), funcArgs.end(), arg) != funcArgs.end();
+    assert(containsArg &&
+           "Found BlockArgument does not belong to func.getArguments()");
+  }
+  if (!args.empty())
+    return args;
+
+  return failure();
 }

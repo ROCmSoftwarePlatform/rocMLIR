@@ -7,7 +7,7 @@
 //===----------------------------------------------------------------------===//
 //
 // Defines MLIR MIGraphX operations.
-// https://rocmsoftwareplatform.github.io/AMDMIGraphX/doc/html/dev/operators.html
+// https://rocm.docs.amd.com/projects/AMDMIGraphX/en/latest/dev/operators.html
 //
 //===----------------------------------------------------------------------===//
 
@@ -98,7 +98,7 @@ def MIGraphX_ClipOp :
 // Keep that logic here.
 def MIGraphX_WhereOp :
     MIGraphX_Op<"where">,
-    Arguments<(ins MIXRShapedOf<[I8]>:$cond,
+    Arguments<(ins MIXRShapedOf<[I8, SI8, UI8]>:$cond,
       AnyMIXRShaped:$inA,
       AnyMIXRShaped:$inB)>,
     Results<(outs AnyMIXRShaped:$output)> {
@@ -175,6 +175,34 @@ def MIGraphX_SqrtOp :
 def MIGraphX_TanhOp :
     MIGraphX_ElementwiseUnaryOp<"tanh">;
 
+// int4 operations
+def MIGraphX_UnpackOp : MIGraphX_Op<"unpack">,
+    Arguments<(ins MIXRShapedOf<[I8, UI8, SI8, I<4>, SI<4>, UI<4>]>:$in,
+                   I64Attr:$axis)>,
+    Results<(outs MIXRShapedOf<[I8, UI8, SI8, I<4>, SI<4>, UI<4>]>:$out)> {
+  let summary = "Unpack int4 vaules stored as bytes";
+  let description = [{
+    Given a shaped tensor of bytes, double the length of `axis` by
+    ```
+    out[..., 2*i, ...] = in[..., i, ...] & 0xf
+    out[..., 2*i + 1, ...] = in[ ..., i, ...] >>[unsigned] 4
+    ```
+
+    That is, the `axis` dimension of `in` consists of, in MLIR terms,
+    `vector<2xi4>`, which we then turn into `vector<2xi8>` by zero-extension
+    and then we flatten out the elements back into `axis`.
+
+    To enable MLIR rewrites, this can also take a tensor of i4 and return
+    the corresponding tensor of i8 (in which case, the `i4` are exposed as an
+    extra dimension and not flattened) or another tensor of i4. This allows us to
+    progressively move unpack up to function boundaries.
+  }];
+
+  let assemblyFormat = [{ $in attr-dict `:` type($in) `->` type($out) }];
+
+  let hasVerifier = 1;
+}
+
 // Quantization operations.
 
 def MIGraphX_QuantizeLinearOp :
@@ -244,7 +272,7 @@ def MIGraphX_AsLogicalShapeOp : MIGraphX_Op<"mlir.as.logical.shape">,
     OpBuilder<(ins "::mlir::Value":$in),
     [{
       $_state.addOperands({in});
-      $_state.addTypes(in.getType().cast<MIXRShapedType>().asTensor());
+      $_state.addTypes(cast<MIXRShapedType>(in.getType()).asTensor());
     }]>
   ];
   let assemblyFormat = [{
@@ -297,7 +325,7 @@ class MIGraphX_ConvOpBase<string mnemonic, list<Type> inputTypes=[], list<Type> 
 }
 
 def MIGraphX_QuantConvolutionOp :
-    MIGraphX_ConvOpBase<"quant_convolution", [F8E4M3FNUZ, F8E5M2FNUZ, I8], [F32, I32]> {
+    MIGraphX_ConvOpBase<"quant_convolution", [F8E4M3FNUZ, F8E5M2FNUZ, F8E5M2, F8E4M3FN, I8, SI8], [F32, I32, SI32]> {
   let summary = "quantized convolution forward";
   let description = [{
     The `migraphx.quant_convolution` op computes quantized convolution forward.
@@ -305,7 +333,8 @@ def MIGraphX_QuantConvolutionOp :
 }
 
 def MIGraphX_ConvolutionOp :
-    MIGraphX_ConvOpBase<"convolution", [F32, F16, BF16, F8E4M3FNUZ, F8E5M2FNUZ], [F32, F16, BF16, F8E4M3FNUZ, F8E5M2FNUZ]> {
+    MIGraphX_ConvOpBase<"convolution", [F32, F16, BF16, F8E4M3FNUZ, F8E5M2FNUZ, F8E5M2, F8E4M3FN],
+                                       [F32, F16, BF16, F8E4M3FNUZ, F8E5M2FNUZ, F8E5M2, F8E4M3FN]> {
   let summary = "convolution forward";
   let description = [{
     The `migraphx.convolution` op computes convolution forward.
@@ -473,7 +502,7 @@ class MIGraphX_DotOpBase<string mnemonic, list<Type> inputTypes=[], list<Type> o
 }
 
 def MIGraphX_QuantDotOp :
-    MIGraphX_DotOpBase<"quant_dot", [F8E4M3FNUZ, F8E5M2FNUZ, I8], [F32, I32]>{
+    MIGraphX_DotOpBase<"quant_dot", [F8E4M3FNUZ, F8E5M2FNUZ, F8E4M3FN, F8E5M2, I8, SI8], [F32, I32, SI32]>{
   let summary = "Dot product of quantized tensors";
   let description = [{
     The `migraphx.quant_dot` op computes the dot product of two tensors.
@@ -512,6 +541,21 @@ def MIGraphX_ReduceMeanOp :
   let summary = "Get the mean of the values in given axis";
   let description = [{
     The `migraphx.reduce_mean` op.
+  }];
+  let assemblyFormat = [{
+    $input attr-dict `:` type($input) `->` type($output)
+  }];
+}
+
+def MIGraphX_ReduceSumOp :
+    MIGraphX_Op<"reduce_sum">,
+    Arguments<(ins AnyMIXRShaped:$input,
+                   I64ArrayAttr:$axes
+                   )>,
+	Results<(outs AnyMIXRShaped:$output)> {
+  let summary = "Get the sum of the values in given axis";
+  let description = [{
+    The `migraphx.reduce_sum` op.
   }];
   let assemblyFormat = [{
     $input attr-dict `:` type($input) `->` type($output)

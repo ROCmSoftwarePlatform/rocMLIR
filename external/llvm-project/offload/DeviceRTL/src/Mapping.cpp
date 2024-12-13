@@ -11,10 +11,10 @@
 
 #include "Mapping.h"
 #include "Debug.h"
+#include "DeviceTypes.h"
+#include "DeviceUtils.h"
 #include "Interface.h"
 #include "State.h"
-#include "Types.h"
-#include "Utils.h"
 
 #pragma omp begin declare target device_type(nohost)
 
@@ -336,7 +336,7 @@ uint32_t mapping::getNumberOfProcessorElements() {
 
 // TODO: This is a workaround for initialization coming from kernels outside of
 //       the TU. We will need to solve this more correctly in the future.
-[[gnu::weak, gnu::used, gnu::retain]] int SHARED(IsSPMDMode);
+[[gnu::weak]] int SHARED(IsSPMDMode);
 
 void mapping::init(bool IsSPMD) {
   if (mapping::isInitialThreadInLevel0(IsSPMD))
@@ -373,5 +373,31 @@ _TGT_KERNEL_LANGUAGE(thread_id, getThreadIdInBlock)
 _TGT_KERNEL_LANGUAGE(block_id, getBlockIdInKernel)
 _TGT_KERNEL_LANGUAGE(block_dim, getNumberOfThreadsInBlock)
 _TGT_KERNEL_LANGUAGE(grid_dim, getNumberOfBlocksInKernel)
+
+extern "C" {
+uint64_t ompx_ballot_sync(uint64_t mask, int pred) {
+  return utils::ballotSync(mask, pred);
+}
+
+int ompx_shfl_down_sync_i(uint64_t mask, int var, unsigned delta, int width) {
+  return utils::shuffleDown(mask, var, delta, width);
+}
+
+float ompx_shfl_down_sync_f(uint64_t mask, float var, unsigned delta,
+                            int width) {
+  return utils::convertViaPun<float>(utils::shuffleDown(
+      mask, utils::convertViaPun<int32_t>(var), delta, width));
+}
+
+long ompx_shfl_down_sync_l(uint64_t mask, long var, unsigned delta, int width) {
+  return utils::shuffleDown(mask, var, delta, width);
+}
+
+double ompx_shfl_down_sync_d(uint64_t mask, double var, unsigned delta,
+                             int width) {
+  return utils::convertViaPun<double>(utils::shuffleDown(
+      mask, utils::convertViaPun<int64_t>(var), delta, width));
+}
+}
 
 #pragma omp end declare target

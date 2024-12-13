@@ -69,7 +69,10 @@ HipBinNvidia::HipBinNvidia() {
   platformInfo.runtime = cuda;
   platformInfo.compiler = nvcc;
   platformInfoNV_ = platformInfo;
+  constructHipPath();
+  constructRoccmPath();
   constructCompilerPath();
+  readHipVersion();
 }
 
 // detects if cuda is installed
@@ -112,6 +115,8 @@ string HipBinNvidia::getHipCC() const {
   hipCCPath = cudaPath;
   hipCCPath /= "bin/nvcc";
   hipCC = hipCCPath.string();
+  if (getOSInfo() == windows)
+    hipCC = "\"" + hipCC + "\"";
   return hipCC;
 }
 
@@ -176,7 +181,11 @@ string HipBinNvidia::getHipInclude() const {
 void HipBinNvidia::initializeHipLdFlags() {
   string hipLdFlags;
   const string& cudaPath = getCompilerPath();
-  hipLdFlags = " -Wno-deprecated-gpu-targets -lcuda -lcudart -L" +
+  if (getOSInfo() == windows)
+    hipLdFlags = " -Wno-deprecated-gpu-targets -lcuda -lcudart -L\"" +
+               cudaPath + "/lib64\"";
+  else
+    hipLdFlags = " -Wno-deprecated-gpu-targets -lcuda -lcudart -L" +
                cudaPath + "/lib64";
   hipLdFlags_ = hipLdFlags;
 }
@@ -196,7 +205,10 @@ const string& HipBinNvidia::getHipLdFlags() const {
 void HipBinNvidia::initializeHipCFlags() {
   string hipCFlags;
   const string& cudaPath = getCompilerPath();
-  hipCFlags += " -isystem " + cudaPath + "/include";
+  if (getOSInfo() == windows)
+    hipCFlags += " -isystem \"" + cudaPath + "/include\"";
+  else
+    hipCFlags += " -isystem " + cudaPath + "/include";
   string hipIncludePath;
   hipIncludePath = getHipInclude();
   hipCFlags += " -isystem \"" + hipIncludePath + "\"";
@@ -212,7 +224,10 @@ const string& HipBinNvidia::getHipCXXFlags() const {
 void HipBinNvidia::initializeHipCXXFlags() {
   string hipCXXFlags = " -Wno-deprecated-gpu-targets ";
   const string& cudaPath = getCompilerPath();
-  hipCXXFlags += " -isystem " + cudaPath + "/include";
+  if (getOSInfo() == windows)
+    hipCXXFlags += " -isystem \"" + cudaPath + "/include\"";
+  else
+    hipCXXFlags += " -isystem " + cudaPath + "/include";
   string hipIncludePath;
   hipIncludePath = getHipInclude();
   hipCXXFlags += " -isystem \"" + hipIncludePath + "\"";
@@ -253,7 +268,10 @@ void HipBinNvidia::printCompilerInfo() const {
   fs::path nvcc;
   nvcc = getCompilerPath();
   nvcc /= "bin/nvcc";
-  cmd = nvcc.string() + " --version";
+  if (getOSInfo() == windows)
+    cmd = "\"" + nvcc.string() + "\"" + " --version";
+  else
+    cmd = nvcc.string() + " --version";
   system(cmd.c_str());
 }
 
@@ -263,7 +281,10 @@ string HipBinNvidia::getCompilerVersion() {
   fs::path nvcc;
   nvcc = getCompilerPath();
   nvcc /= "bin/nvcc";
-  cmd = nvcc.string() + " --version";
+  if (getOSInfo() == windows)
+    cmd = "\"" + nvcc.string() + "\"" + " --version";
+  else
+    cmd = nvcc.string() + " --version";
   system(cmd.c_str());
   return compilerVersion;
 }
@@ -276,7 +297,7 @@ const PlatformInfo& HipBinNvidia::getPlatformInfo() const {
 // returns the cpp config
 string HipBinNvidia::getCppConfig() {
   string cppConfig =
-  " - D__HIP_PLATFORM_NVCC__ = -D__HIP_PLATFORM_NVIDIA__ = -I";
+  " -D__HIP_PLATFORM_NVCC__= -D__HIP_PLATFORM_NVIDIA__= -I";
   string hipPath;
   hipPath = getHipPath();
   cppConfig += hipPath;
@@ -375,7 +396,10 @@ void HipBinNvidia::executeHipCCCmd(vector<string> argv) {
     for (unsigned int i = 2; i < argv.size(); i++) {
       string isaarg = argv.at(i);
       ISACMD += " ";
-      if (!hipBinUtilPtr_->substringPresent(isaarg,"--rocm-path=")) {
+      if (hipBinUtilPtr_->substringPresent(isaarg,"--rocm-path=") ||
+          hipBinUtilPtr_->substringPresent(isaarg,"--hip-path=")) {
+        ISACMD += "-I" + hipBinUtilPtr_->splitStr(isaarg, '=')[1] + "/include";
+      } else {
         ISACMD += isaarg;
       }
     }
@@ -396,6 +420,12 @@ void HipBinNvidia::executeHipCCCmd(vector<string> argv) {
     string trimarg = hipBinUtilPtr_->replaceRegex(arg, toRemove, "");
     bool swallowArg = false;
     bool escapeArg = true;
+    // do not pass amd paths to nvcc
+    if (hipBinUtilPtr_->substringPresent(arg,"--rocm-path=") ||
+        hipBinUtilPtr_->substringPresent(arg,"--hip-path=")) {
+      continue;
+    }
+
     if (arg == "-c" || arg == "--genco" || arg == "-E") {
       compileOnly = true;
       needLDFLAGS  = false;
@@ -554,13 +584,6 @@ void HipBinNvidia::executeHipCCCmd(vector<string> argv) {
     HIPCXXFLAGS += " -M -D__CUDACC__";
     HIPCFLAGS += " -M -D__CUDACC__";
   }
-  if (!var.hipccCompileFlagsAppendEnv_.empty()) {
-    HIPCXXFLAGS += "\" " + var.hipccCompileFlagsAppendEnv_ + "\"";
-    HIPCFLAGS += "\" " + var.hipccCompileFlagsAppendEnv_ + "\"";
-  }
-  if (!var.hipccLinkFlagsAppendEnv_.empty()) {
-    HIPLDFLAGS += "\" " + var.hipccLinkFlagsAppendEnv_ + "\"";
-  }
   string compiler;
   compiler = getHipCC();
   string CMD = compiler;
@@ -574,6 +597,17 @@ void HipBinNvidia::executeHipCCCmd(vector<string> argv) {
     CMD += " " + HIPLDFLAGS;
   }
   CMD += " " + toolArgs;
+  if ((needCFLAGS || needCXXFLAGS) &&
+      !var.hipccCompileFlagsAppendEnv_.empty()) {
+    CMD.append("\" ");
+    CMD.append(var.hipccCompileFlagsAppendEnv_);
+    CMD.append("\" ");
+  }
+  if (needLDFLAGS && !compileOnly && !var.hipccLinkFlagsAppendEnv_.empty()) {
+    CMD.append("\" ");
+    CMD.append(var.hipccLinkFlagsAppendEnv_);
+    CMD.append("\" ");
+  }
   if (verbose & 0x1) {
     cout << "hipcc-cmd: " <<  CMD << "\n";
   }
@@ -591,6 +625,9 @@ void HipBinNvidia::executeHipCCCmd(vector<string> argv) {
   }
   if (runCmd) {
     SystemCmdOut sysOut;
+    if (os == windows)
+      CMD = "\"" + CMD + "\"";
+
     sysOut = hipBinUtilPtr_->exec(CMD.c_str(), true);
     string cmdOut = sysOut.out;
     int CMD_EXIT_CODE = sysOut.exitCode;

@@ -51,7 +51,7 @@ define void @knownbits_zext_in_reg(ptr) nounwind {
 ; X64-NEXT:    jne .LBB0_2
 ; X64-NEXT:    jmp .LBB0_1
 BB:
-  %L5 = load i8, i8* %0
+  %L5 = load i8, ptr %0
   %Sl9 = select i1 true, i8 %L5, i8 undef
   %B21 = udiv i8 %Sl9, -93
   %B22 = udiv i8 %Sl9,  93
@@ -115,7 +115,7 @@ define i128 @knownbits_mask_addc_shl(i64 %a0, i64 %a1, i64 %a2) nounwind {
 ; X64-NEXT:    andq $-1024, %rdi # imm = 0xFC00
 ; X64-NEXT:    andq $-1024, %rsi # imm = 0xFC00
 ; X64-NEXT:    addq %rdi, %rsi
-; X64-NEXT:    adcq $0, %rdx
+; X64-NEXT:    adcl $0, %edx
 ; X64-NEXT:    shldq $54, %rsi, %rdx
 ; X64-NEXT:    xorl %eax, %eax
 ; X64-NEXT:    retq

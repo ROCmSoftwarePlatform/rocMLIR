@@ -20,6 +20,8 @@
 #include "mlir/Dialect/Rock/Pipelines/Pipelines.h"
 #include "mlir/Dialect/Rock/utility/AmdArchDb.h"
 #include "mlir/ExecutionEngine/RocmDeviceName.h"
+#include "mlir/IR/AsmState.h"
+#include "mlir/InitRocMLIRCLOptions.h"
 #include "mlir/InitRocMLIRDialects.h"
 #include "mlir/InitRocMLIRPasses.h"
 #include "mlir/Parser/Parser.h"
@@ -34,7 +36,6 @@
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "bf16convert.hpp"
 #include <unordered_map>
 
 using namespace llvm;
@@ -434,8 +435,7 @@ int main(int argc, char **argv) {
   InitLLVM y(argc, argv);
 
   // Register any pass manager command line options.
-  mlir::registerPassManagerCLOptions();
-  mlir::registerMLIRContextCLOptions();
+  mlir::registerMLIRCLOptions();
   mlir::PassPipelineCLParser passPipeline("", "compiler passes to run");
 
   // Parse pass names in main to ensure static initialization completed.

@@ -2,7 +2,7 @@
 ; RUN: llc < %s -mtriple=i686-- | FileCheck %s --check-prefixes=X86
 ; RUN: llc < %s -mtriple=x86_64-pc-linux-gnu | FileCheck %s --check-prefixes=X64
 
-define i32 @extract3(i15*, i32) nounwind {
+define i32 @extract3(ptr, i32) nounwind {
 ; X86-LABEL: extract3:
 ; X86:       # %bb.0: # %_L1
 ; X86-NEXT:    pushl %ebx
@@ -52,22 +52,21 @@ define i32 @extract3(i15*, i32) nounwind {
 ; X64-NEXT:    movl %eax, %ecx
 ; X64-NEXT:    andl $7, %ecx
 ; X64-NEXT:    movd %ecx, %xmm0
-; X64-NEXT:    movl %eax, %ecx
-; X64-NEXT:    shrl $3, %ecx
-; X64-NEXT:    andl $7, %ecx
-; X64-NEXT:    movd %ecx, %xmm2
-; X64-NEXT:    punpcklwd {{.*#+}} xmm0 = xmm0[0],xmm2[0],xmm0[1],xmm2[1],xmm0[2],xmm2[2],xmm0[3],xmm2[3]
+; X64-NEXT:    movd %eax, %xmm2
+; X64-NEXT:    shrl $3, %eax
+; X64-NEXT:    andl $7, %eax
+; X64-NEXT:    movd %eax, %xmm3
+; X64-NEXT:    punpcklwd {{.*#+}} xmm0 = xmm0[0],xmm3[0],xmm0[1],xmm3[1],xmm0[2],xmm3[2],xmm0[3],xmm3[3]
 ; X64-NEXT:    punpckldq {{.*#+}} xmm0 = xmm0[0],xmm1[0],xmm0[1],xmm1[1]
-; X64-NEXT:    shrl $12, %eax
-; X64-NEXT:    movd %eax, %xmm1
-; X64-NEXT:    punpcklqdq {{.*#+}} xmm0 = xmm0[0],xmm1[0]
+; X64-NEXT:    psrld $12, %xmm2
+; X64-NEXT:    punpcklqdq {{.*#+}} xmm0 = xmm0[0],xmm2[0]
 ; X64-NEXT:    movdqa %xmm0, -24(%rsp)
 ; X64-NEXT:    andl $7, %esi
 ; X64-NEXT:    movzwl -24(%rsp,%rsi,2), %eax
 ; X64-NEXT:    andl $7, %eax
 ; X64-NEXT:    retq
 _L1:
-  %2 = load i15, i15* %0
+  %2 = load i15, ptr %0
   %3 = bitcast i15 %2 to <5 x i3>
   %4 = extractelement <5 x i3> %3, i32 %1
   %5 = zext i3 %4 to i32

@@ -9,7 +9,6 @@
 #include "mlir/Dialect/Rock/IR/Rock.h"
 #include "mlir/Dialect/Rock/IR/RockGemmWrapperInterface.h"
 #include "mlir/Dialect/Rock/IR/RockTypes.h"
-#include "mlir/Dialect/Rock/utility/AmdArchDb.h"
 #include "mlir/Dialect/Rock/utility/math.h"
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -34,9 +33,9 @@
 #include "mlir/IR/TypeRange.h"
 #include "mlir/IR/TypeUtilities.h"
 #include "mlir/IR/Value.h"
+#include "mlir/Parser/Parser.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
-#include "mlir/Support/MathExtras.h"
 
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -66,15 +65,15 @@ struct RockOpAsmDialectInterface : public OpAsmDialectInterface {
   using OpAsmDialectInterface::OpAsmDialectInterface;
 
   AliasResult getAlias(Attribute attr, raw_ostream &os) const override {
-    if (attr.isa<TransformMapAttr>()) {
+    if (isa<TransformMapAttr>(attr)) {
       os << "transform_map";
       return AliasResult::OverridableAlias;
     }
-    if (attr.isa<GeneralGemmParamsAttr>()) {
+    if (isa<GeneralGemmParamsAttr>(attr)) {
       os << "general_gemm_params";
       return AliasResult::OverridableAlias;
     }
-    if (attr.isa<XdlopsGemmParamsAttr>()) {
+    if (isa<XdlopsGemmParamsAttr>(attr)) {
       os << "xldops_gemm_params";
       return AliasResult::OverridableAlias;
     }
@@ -401,29 +400,35 @@ ConvolutionDims ConvolutionDims::fromOp(Operation *op) {
       op->template getAttrOfType<ArrayAttr>("output_layout");
 
   // Get shape of filter tensor.
-  auto filterType = op->getOperand(0).getType().template cast<MemRefType>();
+  auto filterType = cast<MemRefType>(op->getOperand(0).getType());
   ArrayRef<int64_t> filterShape = filterType.getShape();
 
   // Get shape of input tensor.
-  auto inputType = op->getOperand(1).getType().template cast<MemRefType>();
+  auto inputType = cast<MemRefType>(op->getOperand(1).getType());
   ArrayRef<int64_t> inputShape = inputType.getShape();
 
   // Get shape of output tensor.
-  auto outputType = op->getOperand(2).getType().template cast<MemRefType>();
+  auto outputType = cast<MemRefType>(op->getOperand(2).getType());
   ArrayRef<int64_t> outputShape = outputType.getShape();
 
-  int64_t y, x, ho, wo, hi, wi, k, c, n, g;
-  y = x = ho = wo = hi = wi = k = c = n = g = 0;
+  int64_t y, x, z, ho, wo, dout, hi, wi, di, k, c, n, g;
+  y = x = z = ho = wo = dout = hi = wi = di = k = c = n = g = 0;
 
   for (unsigned i = 0; i < filterLayoutAttr.size(); ++i) {
-    auto filterAttr = filterLayoutAttr.getValue()[i].cast<StringAttr>();
-    auto inputAttr = inputLayoutAttr.getValue()[i].cast<StringAttr>();
-    auto outputAttr = outputLayoutAttr.getValue()[i].cast<StringAttr>();
+    auto filterAttr = cast<StringAttr>(filterLayoutAttr.getValue()[i]);
+    auto inputAttr = cast<StringAttr>(inputLayoutAttr.getValue()[i]);
+    auto outputAttr = cast<StringAttr>(outputLayoutAttr.getValue()[i]);
 
     if (filterAttr.getValue() == "y") {
       y = filterShape[i];
+    } else if (filterAttr.getValue() == "0") {
+      y = filterShape[i];
     } else if (filterAttr.getValue() == "x") {
       x = filterShape[i];
+    } else if (filterAttr.getValue() == "1") {
+      x = filterShape[i];
+    } else if (filterAttr.getValue() == "2") {
+      z = filterShape[i];
     } else if (filterAttr.getValue() == "k") {
       k = filterShape[i];
     } else if (filterAttr.getValue() == "c") {
@@ -436,6 +441,12 @@ ConvolutionDims ConvolutionDims::fromOp(Operation *op) {
       hi = inputShape[i];
     } else if (inputAttr.getValue() == "wi") {
       wi = inputShape[i];
+    } else if (inputAttr.getValue() == "0i") {
+      hi = inputShape[i];
+    } else if (inputAttr.getValue() == "1i") {
+      wi = inputShape[i];
+    } else if (inputAttr.getValue() == "2i") {
+      di = inputShape[i];
     } else if (inputAttr.getValue() == "ni") {
       n = inputShape[i];
     }
@@ -444,19 +455,34 @@ ConvolutionDims ConvolutionDims::fromOp(Operation *op) {
       ho = outputShape[i];
     } else if (outputAttr.getValue() == "wo") {
       wo = outputShape[i];
+    } else if (outputAttr.getValue() == "0o") {
+      ho = outputShape[i];
+    } else if (outputAttr.getValue() == "1o") {
+      wo = outputShape[i];
+    } else if (outputAttr.getValue() == "2o") {
+      dout = outputShape[i];
     }
   }
 
-  return ConvolutionDims(y, x, ho, wo, hi, wi, k, c, n, g);
+  SmallVector<int64_t> fil({y, x});
+  if (z > 0)
+    fil.push_back(z);
+  SmallVector<int64_t> out({ho, wo});
+  if (dout > 0)
+    out.push_back(dout);
+  SmallVector<int64_t> in({hi, wi});
+  if (di > 0)
+    in.push_back(di);
+  return ConvolutionDims(fil, out, in, k, c, n, g);
 }
 
 ConvOpType mlir::rock::convOpTypeFromKernelType(KernelType kernelType) {
   switch (kernelType) {
-  case KernelType::Conv2D:
+  case KernelType::Conv:
     return ConvOpType::Fwd;
-  case KernelType::Conv2DBwdData:
+  case KernelType::ConvBwdData:
     return ConvOpType::BwdData;
-  case KernelType::Conv2DBwdWeight:
+  case KernelType::ConvBwdWeight:
     return ConvOpType::BwdWeight;
   case KernelType::Gemm:
     llvm_unreachable(
@@ -471,11 +497,11 @@ ConvOpType mlir::rock::convOpTypeFromKernelType(KernelType kernelType) {
 KernelType mlir::rock::kernelTypeFromConvOpType(ConvOpType convOpType) {
   switch (convOpType) {
   case ConvOpType::Fwd:
-    return KernelType::Conv2D;
+    return KernelType::Conv;
   case ConvOpType::BwdData:
-    return KernelType::Conv2DBwdData;
+    return KernelType::ConvBwdData;
   case ConvOpType::BwdWeight:
-    return KernelType::Conv2DBwdWeight;
+    return KernelType::ConvBwdWeight;
   }
   llvm_unreachable("Unsupported ConvOpType");
 }
@@ -490,14 +516,15 @@ GemmSize GemmSize::fromConvolution(ConvOpType type,
   case ConvOpType::Fwd:
     gemmGSize = sizes.g;
     gemmMSize = sizes.k;
-    gemmKSize = sizes.c * sizes.y * sizes.x;
-    gemmNSize = sizes.n * sizes.ho * sizes.wo;
+    // +++pf: should these accumulate sizes across all dimensions?
+    gemmKSize = sizes.c * sizes.fil[0] * sizes.fil[1];
+    gemmNSize = sizes.n * sizes.out[0] * sizes.out[1];
     break;
   case ConvOpType::BwdWeight:
     gemmGSize = sizes.g;
     gemmMSize = sizes.k;
-    gemmKSize = sizes.n * sizes.ho * sizes.wo;
-    gemmNSize = sizes.c * sizes.y * sizes.x;
+    gemmKSize = sizes.n * sizes.out[0] * sizes.out[1];
+    gemmNSize = sizes.c * sizes.fil[0] * sizes.fil[1];
     break;
   case ConvOpType::BwdData:
     llvm_unreachable("Should've been caught be an assert");
@@ -505,22 +532,33 @@ GemmSize GemmSize::fromConvolution(ConvOpType type,
   return GemmSize(gemmGSize, gemmMSize, gemmKSize, gemmNSize);
 }
 
+static bool isFloat8Type(Type type) {
+  return isa<FloatType>(type) && type.getIntOrFloatBitWidth() == 8;
+}
+
 static LogicalResult verifyGemmTypes(Operation *op, GemmFeatures features,
-                                     Type elemTypeA, Type elemTypeB,
-                                     Type elemTypeC) {
+                                     StringRef arch, Type elemTypeA,
+                                     Type elemTypeB, Type elemTypeC) {
+  bool isGfx11 = arch.contains("gfx11");
   if (bitEnumContainsAll(features, GemmFeatures::wmma)) {
     if (!(elemTypeA.isF16() || elemTypeA.isBF16() || elemTypeA.isInteger(8))) {
-      return op->emitOpError(
-          "Wmma gridwise supports only F16/BF16/int8 data types");
+      if (isGfx11)
+        return op->emitOpError(
+            "Wmma gridwise supports only F16/BF16/int8 data types");
+      if (!isFloat8Type(elemTypeA))
+        return op->emitOpError(
+            "Wmma gridwise supports only F16/BF16/int8/E4M3/E5M2 data types");
     }
+    if (elemTypeA != elemTypeB)
+      return op->emitOpError("Wmma gridwise does not support mixed types");
   }
-  if (elemTypeA.isa<FloatType>() && !elemTypeC.isa<FloatType>()) {
+  if (isa<FloatType>(elemTypeA) && !isa<FloatType>(elemTypeC)) {
     return op->emitOpError("floating-point input type ")
            << elemTypeA
            << " requires a floating-point output type, but the output type is "
            << elemTypeC;
   }
-  if (elemTypeA.isa<IntegerType>() && !elemTypeC.isa<IntegerType>()) {
+  if (isa<IntegerType>(elemTypeA) && !isa<IntegerType>(elemTypeC)) {
     return op->emitOpError("integer input type ")
            << elemTypeA
            << " requires an integer output type, but the output type is "
@@ -531,33 +569,33 @@ static LogicalResult verifyGemmTypes(Operation *op, GemmFeatures features,
 
 static LogicalResult verifyGemmTypes(RockGemmWrapperInterface gemmOp) {
   Type elemTypeA = gemmOp.getAType(), elemTypeB = gemmOp.getBType();
-  Type elemTypeC = gemmOp.getOutArgument()
-                       ->get()
-                       .getType()
-                       .cast<ShapedType>()
+  Type elemTypeC = cast<ShapedType>(gemmOp.getOutArgument()->get().getType())
                        .getElementType();
 
-  return verifyGemmTypes(gemmOp, gemmOp.getGemmFeatures(), elemTypeA, elemTypeB,
-                         elemTypeC);
+  return verifyGemmTypes(gemmOp, gemmOp.getGemmFeatures(), gemmOp.getArch(),
+                         elemTypeA, elemTypeB, elemTypeC);
 }
 
 static LogicalResult verifyConvOp(RockConvInterface convOp) {
   Operation *op = convOp.getOperation();
   auto isDisjointed = [&](llvm::StringRef tensor, llvm::StringRef dim1,
                           llvm::StringRef dim2) {
-    auto layout = op->getAttr(tensor).template cast<ArrayAttr>().getValue();
+    auto layout = cast<ArrayAttr>(op->getAttr(tensor)).getValue();
     auto pos1 = -1, pos2 = -1;
     for (unsigned int i = 0; i < layout.size(); ++i) {
-      if (layout[i].template cast<StringAttr>().getValue() == dim1)
+      if (cast<StringAttr>(layout[i]).getValue() == dim1)
         pos1 = i;
-      if (layout[i].template cast<StringAttr>().getValue() == dim2)
+      if (cast<StringAttr>(layout[i]).getValue() == dim2)
         pos2 = i;
     }
     return (pos2 != pos1 + 1) && (pos1 != pos2 + 1);
   };
 
-  if (isDisjointed("filter_layout", "y", "x") ||
-      isDisjointed("input_layout", "hi", "wi"))
+  if ((isDisjointed("filter_layout", "y", "x") &&
+       isDisjointed("filter_layout", "0", "1")) ||
+      (isDisjointed("input_layout", "hi", "wi") &&
+       isDisjointed("input_layout", "0i", "1i") &&
+       isDisjointed("input_layout", "0", "1")))
     return op->emitError("Disjointed yx or hw!");
 
   RockGemmWrapperInterface gemmOp = cast<RockGemmWrapperInterface>(*convOp);
@@ -575,169 +613,191 @@ static LogicalResult verifyConvOp(RockConvInterface convOp) {
   return success();
 }
 
-LogicalResult Conv2DOp::verify() { return verifyConvOp(*this); }
+LogicalResult ConvOp::verify() { return verifyConvOp(*this); }
 
-LogicalResult Conv2DBwdDataOp::verify() { return verifyConvOp(*this); }
+LogicalResult ConvBwdDataOp::verify() { return verifyConvOp(*this); }
 
-LogicalResult Conv2DBwdWeightOp::verify() { return verifyConvOp(*this); }
+LogicalResult ConvBwdWeightOp::verify() { return verifyConvOp(*this); }
 
-KernelType Conv2DOp::getKernelType() { return KernelType::Conv2D; }
+KernelType ConvOp::getKernelType() { return KernelType::Conv; }
 
-KernelType Conv2DBwdDataOp::getKernelType() {
-  return KernelType::Conv2DBwdData;
+KernelType ConvBwdDataOp::getKernelType() { return KernelType::ConvBwdData; }
+
+KernelType ConvBwdWeightOp::getKernelType() {
+  return KernelType::ConvBwdWeight;
 }
 
-KernelType Conv2DBwdWeightOp::getKernelType() {
-  return KernelType::Conv2DBwdWeight;
-}
+Type ConvOp::getAType() { return getFilter().getType().getElementType(); }
 
-Type Conv2DOp::getAType() { return getFilter().getType().getElementType(); }
-
-Type Conv2DBwdDataOp::getAType() {
+Type ConvBwdDataOp::getAType() {
   return getFilter().getType().getElementType();
 }
 
-Type Conv2DBwdWeightOp::getAType() {
+Type ConvBwdWeightOp::getAType() {
   return getOutput().getType().getElementType();
 }
 
-Type Conv2DOp::getBType() { return getInput().getType().getElementType(); }
+Type ConvOp::getBType() { return getInput().getType().getElementType(); }
 
-Type Conv2DBwdDataOp::getBType() {
+Type ConvBwdDataOp::getBType() {
   return getOutput().getType().getElementType();
 }
 
-Type Conv2DBwdWeightOp::getBType() {
+Type ConvBwdWeightOp::getBType() {
   return getInput().getType().getElementType();
 }
 
-Type Conv2DOp::getCType() { return getOutput().getType().getElementType(); }
+Type ConvOp::getCType() { return getOutput().getType().getElementType(); }
 
-Type Conv2DBwdDataOp::getCType() {
-  return getInput().getType().getElementType();
-}
+Type ConvBwdDataOp::getCType() { return getInput().getType().getElementType(); }
 
-Type Conv2DBwdWeightOp::getCType() {
+Type ConvBwdWeightOp::getCType() {
   return getFilter().getType().getElementType();
 }
 
-OpOperand *Conv2DOp::getOutArgument() { return &(*this)->getOpOperand(2); }
+OpOperand *ConvOp::getOutArgument() { return &(*this)->getOpOperand(2); }
 
-OpOperand *Conv2DBwdDataOp::getOutArgument() {
-  return &(*this)->getOpOperand(1);
-}
+OpOperand *ConvBwdDataOp::getOutArgument() { return &(*this)->getOpOperand(1); }
 
-OpOperand *Conv2DBwdWeightOp::getOutArgument() {
+OpOperand *ConvBwdWeightOp::getOutArgument() {
   return &(*this)->getOpOperand(0);
 }
 
-GemmSize Conv2DOp::getGemmSize() {
+GemmSize ConvOp::getGemmSize() {
   auto sizes = ConvolutionDims::fromOp(*this);
   return GemmSize::fromConvolution(ConvOpType::Fwd, sizes);
 }
 
-GemmSize Conv2DBwdDataOp::getGemmSize() {
+GemmSize ConvBwdDataOp::getGemmSize() {
   auto sizes = ConvolutionDims::fromOp(*this);
   auto padding = extractFromIntegerArrayAttr<int64_t>(this->getPadding());
   auto strides = extractFromIntegerArrayAttr<int64_t>(this->getStrides());
   auto dilations = extractFromIntegerArrayAttr<int64_t>(this->getDilations());
   int64_t kernelId = getKernelId().getSExtValue();
 
-  int64_t strideH = strides[0];
-  int64_t strideW = strides[1];
-  int64_t dilationH = dilations[0];
-  int64_t dilationW = dilations[1];
-  int64_t leftPadH = padding[0];
-  int64_t leftPadW = padding[2];
+  SmallVector<int64_t, 5> gcdStrideDilations;
+  assert(strides.size() == dilations.size());
+  for (const auto &[stride, dilation] : zip(strides, dilations)) {
+    gcdStrideDilations.push_back(math_util::gcd(stride, dilation));
+  }
 
-  int64_t gcdStrideDilationH = math_util::gcd(strideH, dilationH);
-  int64_t gcdStrideDilationW = math_util::gcd(strideW, dilationW);
+  SmallVector<int64_t, 5> filTilda;
+  for (const auto &[stride, gcdSD] : zip(strides, gcdStrideDilations)) {
+    filTilda.push_back(stride / gcdSD);
+  }
 
-  int64_t yTilda = strideH / gcdStrideDilationH;
-  int64_t xTilda = strideW / gcdStrideDilationW;
+  SmallVector<int64_t, 5> outTilda;
+  for (const auto &[out, dilation, fil, stride] :
+       zip(sizes.out, dilations, sizes.fil, strides)) {
+    outTilda.push_back(
+        out + math_util::integer_divide_ceil(dilation * (fil - 1), stride));
+  }
 
-  int64_t hTilda = sizes.ho + math_util::integer_divide_ceil(
-                                  dilationH * (sizes.y - 1), strideH);
-  int64_t wTilda = sizes.wo + math_util::integer_divide_ceil(
-                                  dilationW * (sizes.x - 1), strideW);
+  SmallVector<int64_t, 5> iTildaLeft;
+  SmallVector<int64_t, 5> iTildaRight;
+  for (const auto &[padindex, dilation, tilda, stride] :
+       enumerate(dilations, filTilda, strides)) {
+    iTildaLeft.push_back(math_util::integer_divide_floor(
+        std::max((int64_t)0, padding[2 * padindex] - dilation * (tilda - 1)),
+        stride));
+  }
+  for (const auto &[padindex, out, in, stride] :
+       enumerate(outTilda, sizes.in, strides)) {
+    iTildaRight.push_back(std::min(
+        out,
+        math_util::integer_divide_ceil(padding[2 * padindex] + in - 1, stride) +
+            1));
+  }
 
-  int64_t iHTildaLeft = math_util::integer_divide_floor(
-      std::max((int64_t)0, leftPadH - dilationH * (yTilda - 1)), strideH);
-  int64_t iWTildaLeft = math_util::integer_divide_floor(
-      std::max((int64_t)0, leftPadW - dilationW * (xTilda - 1)), strideW);
+  SmallVector<int64_t, 5> tildaSlice;
+  for (const auto &[right, left] : zip(iTildaRight, iTildaLeft))
+    tildaSlice.push_back(right - left);
 
-  int64_t iHTildaRight = std::min(
-      hTilda,
-      math_util::integer_divide_ceil(leftPadH + sizes.hi - 1, strideH) + 1);
-  int64_t iWTildaRight = std::min(
-      wTilda,
-      math_util::integer_divide_ceil(leftPadW + sizes.wi - 1, strideW) + 1);
-
-  int64_t hTildaSlice = iHTildaRight - iHTildaLeft;
-  int64_t wTildaSlice = iWTildaRight - iWTildaLeft;
-
-  int64_t iYTilda = kernelId / xTilda;
-  int64_t iXTilda = kernelId % xTilda;
-  int64_t yDotSlice = math_util::integer_divide_ceil(sizes.y - iYTilda, yTilda);
-  int64_t xDotSlice = math_util::integer_divide_ceil(sizes.x - iXTilda, xTilda);
+  SmallVector<int64_t, 3> iTilda;
+  SmallVector<int64_t, 3> iDotSlice;
+  int64_t product = 1;
+  for (size_t i = 1; i < sizes.fil.size(); i++)
+    product *= filTilda[i];
+  int64_t divisor = 1;
+  iTilda.resize(sizes.fil.size());
+  switch (sizes.fil.size()) {
+  default:
+    llvm_unreachable("Only 2-D and 3-D have been implemented.");
+    break;
+  case 3:
+    divisor = filTilda[2];
+    iTilda[2] = kernelId % divisor;
+    [[fallthrough]];
+  case 2:
+    iTilda[1] = (kernelId % product) / divisor;
+    iTilda[0] = kernelId / product;
+  }
+  for (size_t i = 0; i < sizes.fil.size(); i++)
+    iDotSlice.push_back(
+        math_util::integer_divide_ceil(sizes.fil[i] - iTilda[i], filTilda[i]));
 
   int64_t g = sizes.g;
   int64_t m = sizes.c;
-  int64_t k = sizes.k * yDotSlice * xDotSlice;
-  int64_t n = sizes.n * hTildaSlice * wTildaSlice;
+  int64_t k = sizes.k;
+  for (auto ds : iDotSlice)
+    k *= ds;
+  int64_t n = sizes.n;
+  for (auto ts : tildaSlice)
+    n *= ts;
 
   return GemmSize(g, m, k, n);
 }
 
-GemmSize Conv2DBwdWeightOp::getGemmSize() {
+GemmSize ConvBwdWeightOp::getGemmSize() {
   auto sizes = ConvolutionDims::fromOp(*this);
   return GemmSize::fromConvolution(ConvOpType::BwdWeight, sizes);
 }
 
-void Conv2DOp::getEffects(
+void ConvOp::getEffects(
     SmallVectorImpl<MemoryEffects::EffectInstance> &effects) {
-  effects.emplace_back(MemoryEffects::Read::get(), getOutput(),
+  effects.emplace_back(MemoryEffects::Read::get(), &getOutputMutable(),
                        transform::TransformMappingResource::get());
-  effects.emplace_back(MemoryEffects::Write::get(), getOutput(),
+  effects.emplace_back(MemoryEffects::Write::get(), &getOutputMutable(),
                        transform::TransformMappingResource::get());
 
-  effects.emplace_back(MemoryEffects::Read::get(), getFilter(),
+  effects.emplace_back(MemoryEffects::Read::get(), &getFilterMutable(),
                        transform::TransformMappingResource::get());
-  effects.emplace_back(MemoryEffects::Read::get(), getInput(),
+  effects.emplace_back(MemoryEffects::Read::get(), &getInputMutable(),
                        transform::TransformMappingResource::get());
 }
 
-void Conv2DBwdDataOp::getEffects(
+void ConvBwdDataOp::getEffects(
     SmallVectorImpl<MemoryEffects::EffectInstance> &effects) {
-  effects.emplace_back(MemoryEffects::Read::get(), getInput(),
+  effects.emplace_back(MemoryEffects::Read::get(), &getInputMutable(),
                        transform::TransformMappingResource::get());
-  effects.emplace_back(MemoryEffects::Write::get(), getInput(),
+  effects.emplace_back(MemoryEffects::Write::get(), &getInputMutable(),
                        transform::TransformMappingResource::get());
 
-  effects.emplace_back(MemoryEffects::Read::get(), getFilter(),
+  effects.emplace_back(MemoryEffects::Read::get(), &getFilterMutable(),
                        transform::TransformMappingResource::get());
-  effects.emplace_back(MemoryEffects::Read::get(), getOutput(),
+  effects.emplace_back(MemoryEffects::Read::get(), &getOutputMutable(),
                        transform::TransformMappingResource::get());
 }
 
-void Conv2DBwdWeightOp::getEffects(
+void ConvBwdWeightOp::getEffects(
     SmallVectorImpl<MemoryEffects::EffectInstance> &effects) {
   const bool hasWorkspace = getWorkspace() != nullptr;
   if (hasWorkspace) {
-    effects.emplace_back(MemoryEffects::Read::get(), getWorkspace(),
+    OpOperand *wsm = &getWorkspaceMutable()[0];
+    effects.emplace_back(MemoryEffects::Read::get(), wsm,
                          transform::TransformMappingResource::get());
-    effects.emplace_back(MemoryEffects::Write::get(), getWorkspace(),
+    effects.emplace_back(MemoryEffects::Write::get(), wsm,
                          transform::TransformMappingResource::get());
   } else {
-    effects.emplace_back(MemoryEffects::Read::get(), getFilter(),
+    effects.emplace_back(MemoryEffects::Read::get(), &getFilterMutable(),
                          transform::TransformMappingResource::get());
-    effects.emplace_back(MemoryEffects::Write::get(), getFilter(),
+    effects.emplace_back(MemoryEffects::Write::get(), &getFilterMutable(),
                          transform::TransformMappingResource::get());
   }
-  effects.emplace_back(MemoryEffects::Read::get(), getInput(),
+  effects.emplace_back(MemoryEffects::Read::get(), &getInputMutable(),
                        transform::TransformMappingResource::get());
 
-  effects.emplace_back(MemoryEffects::Read::get(), getOutput(),
+  effects.emplace_back(MemoryEffects::Read::get(), &getOutputMutable(),
                        transform::TransformMappingResource::get());
 }
 
@@ -751,7 +811,7 @@ LogicalResult GemmOp::verify() {
   Type inElems = typeA.getElementType(), outElems = typeC.getElementType();
   // The integer gemm will produce i32 and then truncate/extend to the requested
   // iN e.g. i8.
-  if (inElems.isa<FloatType>() && !outElems.isa<FloatType>())
+  if (isa<FloatType>(inElems) && !isa<FloatType>(outElems))
     return emitOpError(
         "float-valued inputs must have a floating-point output type");
 
@@ -785,14 +845,14 @@ LogicalResult GemmOp::verify() {
   bool isWmma = bitEnumContainsAll(getFeatures(), GemmFeatures::wmma);
   if (Attribute params = this->getParams().value_or(nullptr)) {
     if (isXdlops &&
-        !params.isa<XdlopsGemmParamsAttr, XdlopsGemmDerivedParamsAttr>())
+        !isa<XdlopsGemmParamsAttr, XdlopsGemmDerivedParamsAttr>(params))
       return emitOpError("an xdlops GEMM has non-xdlops tuning parameters");
     if (getFeatures() == GemmFeatures::none &&
-        !params.isa<GeneralGemmParamsAttr>())
+        !isa<GeneralGemmParamsAttr>(params))
       return emitOpError("an all-hardware gemm must used the general gemm "
                          "tuning parameters");
     if (getDerivedBlockSize().has_value() &&
-        params.isa<GeneralGemmParamsAttr>()) {
+        isa<GeneralGemmParamsAttr>(params)) {
       return emitOpError(
           "cannot have derivedBlockSize when gemm has generalGemmParams");
     }
@@ -842,11 +902,12 @@ static LogicalResult verifyGridwiseGemm(GridOp op) {
   Type aElem = aType.getElementType(), bElem = bType.getElementType(),
        cElem = cType.getElementType();
 
-  if (failed(verifyGemmTypes(op, op.getFeatures(), aElem, bElem, cElem)))
+  if (failed(
+          verifyGemmTypes(op, op.getFeatures(), "gfx00", aElem, bElem, cElem)))
     return failure();
   if (aElem.isInteger(8) && !(cElem.isInteger(32) || cElem.isInteger(8)))
     return op.emitOpError("i8 input requires i32 or i8 output");
-  if ((aElem.isFloat8E4M3FNUZ() || aElem.isFloat8E5M2FNUZ()) && !cElem.isF32())
+  if (isFloat8Type(aElem) && !cElem.isF32())
     return op.emitOpError("8-bit float input requires f32 output");
 
   ArrayRef<int64_t> aShape = aType.getShape(), bShape = bType.getShape(),
@@ -905,7 +966,7 @@ LogicalResult ExtractSliceOp::canonicalize(ExtractSliceOp op,
 }
 
 LogicalResult ExtractSliceOp::verify() {
-  if (auto destType = getResult().getType().dyn_cast<VectorType>()) {
+  if (auto destType = dyn_cast<VectorType>(getResult().getType())) {
     size_t destSize = destType.getDimSize(0);
     size_t sourceSize = getVector().getType().getDimSize(0);
     if (destSize > sourceSize)
@@ -929,7 +990,7 @@ LogicalResult InsertSliceOp::canonicalize(InsertSliceOp op,
   return failure();
 }
 LogicalResult InsertSliceOp::verify() {
-  if (auto sourceType = getSource().getType().dyn_cast<VectorType>()) {
+  if (auto sourceType = dyn_cast<VectorType>(getSource().getType())) {
     size_t sourceSize = sourceType.getDimSize(0);
     size_t destSize = getDest().getType().getDimSize(0);
     if (sourceSize > destSize)
@@ -939,6 +1000,47 @@ LogicalResult InsertSliceOp::verify() {
           Twine(destSize));
   }
   return success();
+}
+
+//===-----------------------------------------------------===//
+// GpuAllocOp
+//===-----------------------------------------------------===//
+
+static int64_t getByteSize(MemRefType memref) {
+  int64_t elementBitWidth = 0;
+  Type type = memref.getElementType();
+  if (auto vecType = dyn_cast<VectorType>(type)) {
+    elementBitWidth =
+        (vecType.getElementTypeBitWidth() * vecType.getNumElements());
+  } else {
+    elementBitWidth = type.getIntOrFloatBitWidth();
+  }
+  return (memref.getNumElements() * elementBitWidth) / 8;
+}
+
+LogicalResult GpuAllocOp::verify() {
+  // Make sure the size is bigger than 0
+  if (getByteSize(getOutput().getType()) > 0) {
+    return success();
+  }
+  return emitError("The size of rock.alloc should be greather than zero.");
+}
+
+//===-----------------------------------------------------===//
+// GpuDeallocOp
+//===-----------------------------------------------------===//
+
+LogicalResult GpuDeallocOp::verify() {
+  // Make sure the input memref defining operation is a GpuAllocOp
+  if (auto gpuAlloc = dyn_cast<GpuAllocOp>(getMemref().getDefiningOp())) {
+    // Make sure the size is bigger than 0
+    if (getByteSize(getMemref().getType()) > 0) {
+      return success();
+    }
+    return emitError("The size of rock.dealloc should be greather than zero.");
+  }
+  return emitError("The operand of rock.dealloc must be the result of a "
+                   "rock.alloc operation.");
 }
 
 //===-----------------------------------------------------===//
@@ -1043,8 +1145,7 @@ void TransformingForOp::build(OpBuilder &b, OperationState &state,
     if (domain.empty()) // No transforms, copy upper coordinates
       len = upperLen;
     else
-      len = domain[domain.size() - 1]
-                .cast<TransformMapAttr>()
+      len = cast<TransformMapAttr>(domain[domain.size() - 1])
                 .getLowerBounds()
                 .size();
     for (int32_t i = 0; i < len; ++i)
@@ -1118,18 +1219,17 @@ ParseResult TransformingForOp::parse(OpAsmParser &parser,
           }
         } else {
           for (Attribute a : theseTransforms) {
-            if (!a.isa<TransformMapAttr>()) {
+            if (!isa<TransformMapAttr>(a)) {
               return parser.emitError(loopIterLoc,
                                       "Expected transform map attributes");
             }
           }
-          size_t nInputs = theseTransforms[0]
-                               .cast<TransformMapAttr>()
+          size_t nInputs = cast<TransformMapAttr>(theseTransforms[0])
                                .getMap()
                                .getAffineMap()
                                .getNumInputs();
-          size_t nOutputs = theseTransforms[theseTransforms.size() - 1]
-                                .cast<TransformMapAttr>()
+          size_t nOutputs = cast<TransformMapAttr>(
+                                theseTransforms[theseTransforms.size() - 1])
                                 .getMap()
                                 .getAffineMap()
                                 .getNumResults();
@@ -1255,10 +1355,11 @@ ParseResult TransformingForOp::parse(OpAsmParser &parser,
 }
 
 void TransformingForOp::print(OpAsmPrinter &p) {
-  p.printOptionalAttrDict(getOperation()->getAttrs(), /*elidedAttrs=*/{
-                              TransformingForOp::getOperandSegmentSizeAttr(),
-                              getTransformsAttrName(), getLowerStartsAttrName(),
-                              getBoundsAttrName(), getStridesAttrName()});
+  p.printOptionalAttrDict(
+      getOperation()->getAttrs(),
+      /*elidedAttrs=*/{TransformingForOp::getOperandSegmentSizeAttr(),
+                       getTransformsAttrName(), getLowerStartsAttrName(),
+                       getBoundsAttrName(), getStridesAttrName()});
   p << " ";
   for (uint32_t i = 0, e = domains(); i < e; ++i) {
     p << "(";
@@ -1304,8 +1405,8 @@ LogicalResult TransformingForOp::verify() {
     return emitOpError("Bounds list and strides list must have same length");
 
   for (size_t i = 0, e = getBounds().size(); i < e; ++i) {
-    int64_t bound = getBounds()[i].cast<IntegerAttr>().getInt();
-    int64_t stride = getStrides()[i].cast<IntegerAttr>().getInt();
+    int64_t bound = cast<IntegerAttr>(getBounds()[i]).getInt();
+    int64_t stride = cast<IntegerAttr>(getStrides()[i]).getInt();
     if (stride <= 0)
       return emitOpError("Negative and zero strides are not permitted");
     if (bound % stride != 0)
@@ -1343,13 +1444,11 @@ LogicalResult TransformingForOp::verify() {
                            Twine(i));
       }
     } else {
-      size_t nUpper = transforms[0]
-                          .cast<TransformMapAttr>()
+      size_t nUpper = cast<TransformMapAttr>(transforms[0])
                           .getMap()
                           .getValue()
                           .getNumInputs();
-      size_t nLower = transforms[transforms.size() - 1]
-                          .cast<TransformMapAttr>()
+      size_t nLower = cast<TransformMapAttr>(transforms[transforms.size() - 1])
                           .getMap()
                           .getValue()
                           .getNumResults();
@@ -1383,7 +1482,9 @@ void TransformingForOp::moveOutOfLoop(ArrayRef<Operation *> ops) {
   for (auto *op : ops)
     op->moveBefore(*this);
 }
-SmallVector<Region *> TransformingForOp::getLoopRegions() { return {&getRegion()}; }
+SmallVector<Region *> TransformingForOp::getLoopRegions() {
+  return {&getRegion()};
+}
 
 //===-----------------------------------------------------===//
 // IndexDiffUpdateOp
@@ -1430,7 +1531,7 @@ LogicalResult GlobalLoadOp::verify() {
   if (getCanReadOffEnd() && nDims != 1)
     return emitOpError("can only have one dimension in canReadOffEnd loads");
   Attribute memSpaceAttr = sourceType.getMemorySpace();
-  auto gpuMemSpaceAttr = memSpaceAttr.dyn_cast_or_null<gpu::AddressSpaceAttr>();
+  auto gpuMemSpaceAttr = dyn_cast_or_null<gpu::AddressSpaceAttr>(memSpaceAttr);
   if (memSpaceAttr && (!gpuMemSpaceAttr ||
                        gpuMemSpaceAttr.getValue() != gpu::AddressSpace::Global))
     return emitOpError("Source memref must live in global memory");
@@ -1448,7 +1549,7 @@ LogicalResult GlobalStoreOp::verify() {
   if (getCanStoreOffEnd() && nDims != 1)
     return emitOpError("can only have one dimension in a canStoreOffEnd write");
   Attribute memSpaceAttr = destType.getMemorySpace();
-  auto gpuMemSpaceAttr = memSpaceAttr.dyn_cast_or_null<gpu::AddressSpaceAttr>();
+  auto gpuMemSpaceAttr = dyn_cast_or_null<gpu::AddressSpaceAttr>(memSpaceAttr);
   if (memSpaceAttr && (!gpuMemSpaceAttr ||
                        gpuMemSpaceAttr.getValue() != gpu::AddressSpace::Global))
     return emitOpError("Destination memref must live in global memory");
@@ -1468,7 +1569,7 @@ LogicalResult InBoundsLoadOp::verify() {
   if (getCoords().size() != nDims)
     return emitOpError("Expected " + Twine(nDims) + " coordinates for load");
   Type resultType = getResult().getType();
-  if (resultType.isa<ShapedType>() && !resultType.isa<VectorType>())
+  if (isa<ShapedType>(resultType) && !isa<VectorType>(resultType))
     return emitOpError(
         "Non-scalar loads must return vectors, not other shaped types");
   return success();
@@ -1483,7 +1584,7 @@ LogicalResult InBoundsStoreOp::verify() {
   if (getCoords().size() != nDims)
     return emitOpError("Expected " + Twine(nDims) + " coordinates for store");
   Type dataType = getData().getType();
-  if (dataType.isa<ShapedType>() && !dataType.isa<VectorType>())
+  if (isa<ShapedType>(dataType) && !isa<VectorType>(dataType))
     return emitOpError(
         "Non-scalar data types must be vectors, not other shaped types");
   return success();
@@ -1526,9 +1627,9 @@ LogicalResult ThreadwiseReadIntoOp::verify() {
   Attribute dstMemSpaceAttr = destType.getMemorySpace();
   Attribute srcMemSpaceAttr = srcType.getMemorySpace();
   auto gpuDstMemSpaceAttr =
-      dstMemSpaceAttr.dyn_cast_or_null<gpu::AddressSpaceAttr>();
+      dyn_cast_or_null<gpu::AddressSpaceAttr>(dstMemSpaceAttr);
   auto gpuSrcMemSpaceAttr =
-      srcMemSpaceAttr.dyn_cast_or_null<gpu::AddressSpaceAttr>();
+      dyn_cast_or_null<gpu::AddressSpaceAttr>(srcMemSpaceAttr);
   if (dstMemSpaceAttr &&
       (!gpuDstMemSpaceAttr ||
        gpuDstMemSpaceAttr.getValue() != gpu::AddressSpace::Private))
@@ -1538,7 +1639,7 @@ LogicalResult ThreadwiseReadIntoOp::verify() {
   if (extraViews.empty())
     inputShape = getSource().getType().getShape();
   else
-    inputShape = extraViews[0].cast<TransformMapAttr>().getUpperBounds();
+    inputShape = cast<TransformMapAttr>(extraViews[0]).getUpperBounds();
 
   size_t extraIdxCount = getExtraIndices().size();
   if (inputShape.empty()) {
@@ -1550,8 +1651,8 @@ LogicalResult ThreadwiseReadIntoOp::verify() {
 
   // Add more constraints if we see vector buffers (e.g.,
   // memref<Kxvector<vxf16>>)
-  VectorType srcVectorType = srcType.getElementType().dyn_cast<VectorType>();
-  VectorType dstVectorType = destType.getElementType().dyn_cast<VectorType>();
+  VectorType srcVectorType = dyn_cast<VectorType>(srcType.getElementType());
+  VectorType dstVectorType = dyn_cast<VectorType>(destType.getElementType());
   if ((srcVectorType || dstVectorType) &&
       gpuSrcMemSpaceAttr.getValue() != gpu::AddressSpace::Workgroup &&
       gpuSrcMemSpaceAttr.getValue() != gpu::AddressSpace::Private)
@@ -1566,6 +1667,23 @@ LogicalResult ThreadwiseReadIntoOp::verify() {
           "Vector buffers vector's lengths need to be evenly divisible");
   }
 
+  if (!getDynamicValidities().empty()) {
+    if (srcType.getElementType() != destType.getElementType()) {
+      return emitOpError("dynamic validities applied where the "
+                         "source and destination have different types are "
+                         "currently unimplemented");
+    }
+    if (srcVectorType) {
+      return emitOpError(
+          "dynamic validities with vector buffers are unimplemented");
+    }
+    if (!gpuSrcMemSpaceAttr ||
+        gpuSrcMemSpaceAttr.getValue() != gpu::AddressSpace::Private) {
+      return emitOpError(
+          "it's currently expeccted that dynamic validities will only be used "
+          "in register-to-register reads produced by input fusion");
+    }
+  }
   return success();
 }
 
@@ -1604,7 +1722,7 @@ ThreadwiseWriteAllOp::cloneWithExtraIndices(OpBuilder &builder,
 LogicalResult ThreadwiseWriteAllOp::verify() {
   MemRefType sourceType = getSource().getType();
   Attribute memSpaceAttr = sourceType.getMemorySpace();
-  auto gpuMemSpaceAttr = memSpaceAttr.dyn_cast_or_null<gpu::AddressSpaceAttr>();
+  auto gpuMemSpaceAttr = dyn_cast_or_null<gpu::AddressSpaceAttr>(memSpaceAttr);
   if (memSpaceAttr && (!gpuMemSpaceAttr || gpuMemSpaceAttr.getValue() !=
                                                gpu::AddressSpace::Private))
     return emitOpError("source must be private registers");
@@ -1613,7 +1731,7 @@ LogicalResult ThreadwiseWriteAllOp::verify() {
   if (extraViews.empty())
     outputShape = getDest().getType().getShape();
   else
-    outputShape = extraViews[0].cast<TransformMapAttr>().getUpperBounds();
+    outputShape = cast<TransformMapAttr>(extraViews[0]).getUpperBounds();
 
   size_t extraIdxCount = getExtraIndices().size();
   if (outputShape.empty()) {
@@ -1763,6 +1881,20 @@ LogicalResult GridwiseAttentionAccelOp::verify() {
   return success();
 }
 
+void GridwiseAttentionAccelOp::getEffects(
+    SmallVectorImpl<MemoryEffects::EffectInstance> &effects) {
+  auto *read = MemoryEffects::Read::get();
+  auto *write = MemoryEffects::Write::get();
+  effects.emplace_back(read, &getOutMutable());
+  effects.emplace_back(write, &getOutMutable());
+
+  effects.emplace_back(read, &getQueriesMutable());
+  effects.emplace_back(read, &getKeysMutable());
+  effects.emplace_back(read, &getValuesMutable());
+  for (auto &regionArg : getPreSoftmaxElemWiseInputsMutable())
+    effects.emplace_back(read, &regionArg);
+}
+
 //===----------------------------------------------------------------------===//
 // WorkgroupIdOp and WorkitemIdOp
 //===----------------------------------------------------------------------===//
@@ -1775,7 +1907,7 @@ getIdRange(StringRef idName, Operation *op,
   APInt max(bitwidth, fallback);
   if (func::FuncOp container = op->getParentOfType<func::FuncOp>()) {
     if (IntegerAttr size =
-            container->getAttr(idName).dyn_cast_or_null<IntegerAttr>()) {
+            dyn_cast_or_null<IntegerAttr>(container->getAttr(idName))) {
       // Range inference uses ranges that're inclusive on both ends
       max = APInt(bitwidth, size.getValue().getSExtValue() - 1);
     }
@@ -1799,9 +1931,9 @@ void WorkitemIdOp::inferResultRanges(ArrayRef<ConstantIntRanges> argRanges,
 
 LogicalResult ReduceOp::verify() {
   APInt axis = getAxis();
-  ArrayRef<int64_t> inpShape = getIn().getType().cast<ShapedType>().getShape();
+  ArrayRef<int64_t> inpShape = cast<ShapedType>(getIn().getType()).getShape();
   for (const auto &dimAndSize :
-       llvm::enumerate(getOut().getType().cast<ShapedType>().getShape())) {
+       llvm::enumerate(cast<ShapedType>(getOut().getType()).getShape())) {
     size_t dim = dimAndSize.index();
     int64_t dimSize = dimAndSize.value();
     if (dim == axis) {
@@ -1810,8 +1942,8 @@ LogicalResult ReduceOp::verify() {
       }
     } else {
       if (dimSize != inpShape[dim]) {
-        return emitError(
-            "The size of the non-reduction dimension should match the input.");
+        return emitError("The size of the non-reduction dimension should "
+                         "match the input.");
       }
     }
   }
@@ -1828,30 +1960,27 @@ LogicalResult BlockwiseBroadcastReduceOp::verify() {
   // where {d0, ... , Dr , ... , dn} represent a blockwise tile
   // of a larger tensor that is being reduced.
   size_t inputViewArrLen = inputViewArrayAttr.size();
-  ArrayRef<int64_t> inputTensorShape = inputViewArrayAttr[inputViewArrLen - 1]
-                                           .cast<TransformMapAttr>()
-                                           .getLowerBounds()
-                                           .asArrayRef();
+  ArrayRef<int64_t> inputTensorShape =
+      cast<TransformMapAttr>(inputViewArrayAttr[inputViewArrLen - 1])
+          .getLowerBounds()
+          .asArrayRef();
   ArrayAttr tidSubTileSliceView = getTidSubTileSliceView();
   int64_t axis = getAxis().getSExtValue();
   size_t tidSubTileSliceViewArrLen = tidSubTileSliceView.size();
   ArrayRef<int64_t> inputPartialReductionTensorShape =
-      tidSubTileSliceView[tidSubTileSliceViewArrLen - 1]
-          .cast<TransformMapAttr>()
+      cast<TransformMapAttr>(tidSubTileSliceView[tidSubTileSliceViewArrLen - 1])
           .getLowerBounds()
           .asArrayRef();
-  ArrayRef<int64_t> inputThreadView = inputViewArrayAttr[0]
-                                          .cast<TransformMapAttr>()
-                                          .getUpperBounds()
-                                          .asArrayRef();
+  ArrayRef<int64_t> inputThreadView =
+      cast<TransformMapAttr>(inputViewArrayAttr[0])
+          .getUpperBounds()
+          .asArrayRef();
   ArrayRef<int64_t> wsShape = getWorkspaceBuffer().getType().getShape();
   int64_t blockSize = getBlockSize();
 
   gpu::AddressSpaceAttr inMemSpaceAttr =
-      getInput()
-          .getType()
-          .getMemorySpace()
-          .dyn_cast_or_null<gpu::AddressSpaceAttr>();
+      dyn_cast_or_null<gpu::AddressSpaceAttr>(
+          getInput().getType().getMemorySpace());
   if (!inMemSpaceAttr) {
     return emitError("No gpu memspace attr found in input memref; the input "
                      "memref should be in regs");
@@ -1862,10 +1991,8 @@ LogicalResult BlockwiseBroadcastReduceOp::verify() {
   }
 
   gpu::AddressSpaceAttr outMemSpaceAttr =
-      getOutput()
-          .getType()
-          .getMemorySpace()
-          .dyn_cast_or_null<gpu::AddressSpaceAttr>();
+      dyn_cast_or_null<gpu::AddressSpaceAttr>(
+          getOutput().getType().getMemorySpace());
   if (!outMemSpaceAttr) {
     return emitError("No gpu memspace attr found in output memref; the output "
                      "memref should be in regs");
@@ -1876,10 +2003,8 @@ LogicalResult BlockwiseBroadcastReduceOp::verify() {
   }
 
   gpu::AddressSpaceAttr wsMemSpaceAttr =
-      getWorkspaceBuffer()
-          .getType()
-          .getMemorySpace()
-          .dyn_cast_or_null<gpu::AddressSpaceAttr>();
+      dyn_cast_or_null<gpu::AddressSpaceAttr>(
+          getWorkspaceBuffer().getType().getMemorySpace());
   if (!wsMemSpaceAttr) {
     return emitError("No gpu memspace attr found in workspace memref; the "
                      "workspace memref should be in LDS");
@@ -1890,8 +2015,8 @@ LogicalResult BlockwiseBroadcastReduceOp::verify() {
   }
 
   if (inputThreadView[0] != blockSize) {
-    return emitError(
-        "first dimension of the input view should be equal to the block size");
+    return emitError("first dimension of the input view should be equal to "
+                     "the block size");
   }
   if (wsShape.size() != 1) {
     return emitError("workspace LDS buffer should be flat");
@@ -1908,7 +2033,7 @@ LogicalResult BlockwiseBroadcastReduceOp::verify() {
   }
   if (blockwiseInputPartialReductionTensorElements > wsShape[0]) {
     return emitError(
-        "workspace should be at least the size of elements per block");
+        "workspace should be at least the size of elements per block ");
   }
   return success();
 }
@@ -1922,9 +2047,8 @@ LogicalResult BlockwiseFillOp::verify() {
   if (memrefType.getRank() != 1) {
     return emitError("Blockwise fill expects a flat memref");
   }
-  if (gpu::AddressSpaceAttr memSpace =
-          memrefType.getMemorySpace()
-              .dyn_cast_or_null<gpu::AddressSpaceAttr>()) {
+  if (gpu::AddressSpaceAttr memSpace = dyn_cast_or_null<gpu::AddressSpaceAttr>(
+          memrefType.getMemorySpace())) {
     if (memSpace.getValue() != gpu::AddressSpace::Workgroup) {
       return emitError("Memory space is expected to be workgroup");
     }
@@ -1974,7 +2098,104 @@ LogicalResult AttentionOp::verify() {
   if (keyN != valueK) {
     return emitError("reduction dimensions of second gemm do not match");
   }
+
+  // check output type
+  ShapedType oType = getOut().getType();
+  int64_t oBatchDim = oType.getShape().size() == 3 ? oType.getShape()[0] : 1;
+
+  ArrayRef<int64_t> oLastDims = oType.getShape().slice(oType.getRank() - 2);
+  auto [outputSeqLen, outputHeadDim] =
+      getOTransposed() ? std::tuple{oLastDims[1], oLastDims[0]}
+                       : std::tuple{oLastDims[0], oLastDims[1]};
+
+  if (qType.getShape().size() != oType.getShape().size()) {
+    return emitError("Number of dimensions do not match (Q and Output)");
+  }
+  if (qBatchDim != oBatchDim) {
+    return emitError("Batch dimensions do not match (Q and Output)");
+  }
+  if (queryM != outputSeqLen) {
+    return emitError("Sequence length does not match (Q and Output)");
+  }
+  if (valueN != outputHeadDim) {
+    return emitError("Head dimensions do not match (V and Output)");
+  }
+
+  // check currentSeqLen (KV Cache)
+  auto currentSeqLen = getCurrentSeqLen();
+  if (currentSeqLen) {
+    ShapedType seqLenType = currentSeqLen.getType();
+    if (seqLenType.getShape().size() != 1) {
+      return emitError("Number of dimensions is not one (currentSeqLen)");
+    }
+    if (seqLenType.getShape()[0] != oBatchDim) {
+      return emitError(
+          "Batch dimensions do not match (currentSeqLen and Output)");
+    }
+  }
   return success();
+}
+
+void AttentionOp::getEffects(
+    SmallVectorImpl<MemoryEffects::EffectInstance> &effects) {
+  auto *read = MemoryEffects::Read::get();
+  auto *write = MemoryEffects::Write::get();
+  effects.emplace_back(read, &getOutMutable());
+  effects.emplace_back(write, &getOutMutable());
+
+  effects.emplace_back(read, &getQueriesMutable());
+  effects.emplace_back(read, &getKeysMutable());
+  effects.emplace_back(read, &getValuesMutable());
+  for (auto &regionArg : getPreSoftmaxElemWiseInputsMutable())
+    effects.emplace_back(read, &regionArg);
+}
+
+//===-----------------------------------------------------===//
+// AttentionPerfConfig Attr
+//===-----------------------------------------------------===//
+
+AttnPerfConfigAttr AttnPerfConfigAttr::get(StringAttr perfConfigStrAttr) {
+  // Here a conventional c++ string split is being
+  // done because MLIR lacks parseSourceString() method
+  // to parse Attributes and its only there for Ops.
+  StringRef perfConfigStrRef = perfConfigStrAttr.strref();
+  StringRef token;
+  StringRef rest;
+  std::tie(token, rest) = perfConfigStrRef.split(':');
+  if (token != "attn") {
+    return {};
+  }
+  std::tie(token, rest) = rest.split(':');
+  if (token.substr(0, 1) != "v") {
+    return {};
+  }
+  int version;
+  if (!llvm::to_integer(token.slice(1, StringRef::npos), version)) {
+    return {};
+  }
+  if (version != 1) {
+    return {};
+  }
+  SmallVector<StringRef, 8> tokens;
+  rest.split(tokens, ',');
+  if (tokens.size() != 8) {
+    return {};
+  }
+  SmallVector<int64_t, 8> params;
+  llvm::transform(tokens, std::back_inserter(params), [](StringRef s) {
+    int param;
+    llvm::to_integer(s, param);
+    return param;
+  });
+  return AttnPerfConfigAttr::get(perfConfigStrAttr.getContext(),
+                                 /*mPerBlockG0=*/params[0],
+                                 /*mPerBlockG1=*/params[1],
+                                 /*nPerBlockG0=*/params[2],
+                                 /*kpackPerBlock=*/params[3],
+                                 /*mPerWave=*/params[4],
+                                 /*mnPerXdl*/ params[5],
+                                 /*kpack=*/params[6],
+                                 /*forceUnroll=*/params[7] == 1);
 }
 
 //===-----------------------------------------------------===//

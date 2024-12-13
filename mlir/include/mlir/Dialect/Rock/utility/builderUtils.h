@@ -11,7 +11,8 @@ namespace mlir {
 namespace rock {
 /// Utility op to emit constant float op
 Value createConstantFloatOp(OpBuilder &b, Location loc, Type type,
-                            Type elemType, float value);
+                            Type elemType, float value,
+                            APFloat::opStatus expectedStatus = APFloat::opOK);
 
 /// Utility op to emit constant int op
 Value createConstantIntOp(OpBuilder &b, Location loc, Type type, Type elemType,
@@ -32,9 +33,16 @@ Value createCollapseShapeOp(OpBuilder &b, Location loc, Value source);
 /// Utility function to get the number of bytes a value of type `type` takes up.
 int64_t getByteWidth(Type type);
 
+// Get a 1-D version of the shaped type `type`, preserving memory space.
+Type getFlattenedType(Type type);
+
 // Utility function to get a MemRef as a tensor
 Value getAsTensor(OpBuilder &builder, Location loc, mlir::Value value,
                   bool isWritable = false);
+
+// Return the type of a boolean vector whose shape is the same as the shape of
+// `v` except that its elements are booleans.
+Type vectorOfBoolShapedLike(Value v);
 
 } // namespace rock
 } // namespace mlir

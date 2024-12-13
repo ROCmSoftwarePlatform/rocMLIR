@@ -5,6 +5,11 @@
 #include <cstdlib>
 #include <cstring>
 
+using namespace omptest;
+
+// Global Logger instance
+extern logging::Logger *Log;
+
 // Callback handler, which receives and relays OMPT callbacks
 extern OmptCallbackHandler *Handler;
 
@@ -23,7 +28,7 @@ static OmptEventReporter *EventReporter;
 
 #define OMPT_BUFFER_REQUEST_SIZE 256
 
-#ifndef LIBOMPTARGET_LIBOMPTEST_USE_GTEST
+#ifndef LIBOFFLOAD_LIBOMPTEST_USE_GOOGLETEST
 std::unordered_map<std::string, TestSuite> TestRegistrar::Tests;
 #endif
 
@@ -31,6 +36,7 @@ static std::atomic<ompt_id_t> NextOpId{0x8000000000000001};
 static bool UseEMICallbacks = false;
 static bool UseTracing = false;
 static bool RunAsTestSuite = false;
+static bool ColoredLog = false;
 
 // OMPT entry point handles
 static ompt_set_trace_ompt_t ompt_set_trace_ompt = 0;
@@ -45,12 +51,6 @@ static ompt_get_record_type_t ompt_get_record_type_fn = 0;
 typedef std::unordered_set<ompt_device_t *> OmptDeviceSetTy;
 typedef std::unique_ptr<OmptDeviceSetTy> OmptDeviceSetPtrTy;
 static OmptDeviceSetPtrTy TracedDevices;
-
-// Tracing buffer helper function
-static void delete_buffer_ompt(ompt_buffer_t *buffer) {
-  free(buffer);
-  printf("Deallocated %p\n", buffer);
-}
 
 // OMPT callbacks
 
@@ -80,15 +80,17 @@ static void on_ompt_callback_buffer_complete(
     if (ompt_get_record_type_fn(buffer, CurrentPos) != ompt_record_ompt) {
       printf("WARNING: received non-ompt type buffer object\n");
     }
-    // ToDo: Sometimes it may happen that the retrieved record may be null?!
+    // TODO: Sometimes it may happen that the retrieved record may be null?!
     // Only handle non-null records
     if (Record != nullptr)
       OmptCallbackHandler::get().handleBufferRecord(Record);
     Status = ompt_advance_buffer_cursor(/*device=*/NULL, buffer, bytes,
                                         CurrentPos, &CurrentPos);
   }
-  if (buffer_owned)
-    delete_buffer_ompt(buffer);
+  if (buffer_owned) {
+    OmptCallbackHandler::get().handleBufferRecordDeallocation(buffer);
+    free(buffer);
+  }
 }
 
 static ompt_set_result_t set_trace_ompt(ompt_device_t *Device) {
@@ -96,18 +98,17 @@ static ompt_set_result_t set_trace_ompt(ompt_device_t *Device) {
     return ompt_set_error;
 
   if (UseEMICallbacks) {
-    ompt_set_trace_ompt(/*device=*/Device, /*enable=*/1,
+    ompt_set_trace_ompt(Device, /*enable=*/1,
                         /*etype=*/ompt_callback_target_emi);
-    ompt_set_trace_ompt(/*device=*/Device, /*enable=*/1,
+    ompt_set_trace_ompt(Device, /*enable=*/1,
                         /*etype=*/ompt_callback_target_data_op_emi);
-    ompt_set_trace_ompt(/*device=*/Device, /*enable=*/1,
+    ompt_set_trace_ompt(Device, /*enable=*/1,
                         /*etype=*/ompt_callback_target_submit_emi);
   } else {
-    ompt_set_trace_ompt(/*device=*/Device, /*enable=*/1,
-                        /*etype=*/ompt_callback_target);
-    ompt_set_trace_ompt(/*device=*/Device, /*enable=*/1,
+    ompt_set_trace_ompt(Device, /*enable=*/1, /*etype=*/ompt_callback_target);
+    ompt_set_trace_ompt(Device, /*enable=*/1,
                         /*etype=*/ompt_callback_target_data_op);
-    ompt_set_trace_ompt(/*device=*/Device, /*enable=*/1,
+    ompt_set_trace_ompt(Device, /*enable=*/1,
                         /*etype=*/ompt_callback_target_submit);
   }
 
@@ -174,13 +175,25 @@ static void on_ompt_callback_work(ompt_work_t work_type,
                                   ompt_data_t *parallel_data,
                                   ompt_data_t *task_data, uint64_t count,
                                   const void *codeptr_ra) {
-  if (endpoint == ompt_scope_begin || endpoint == ompt_scope_beginend)
-    OmptCallbackHandler::get().handleWorkBegin(
-        work_type, endpoint, parallel_data, task_data, count, codeptr_ra);
+  OmptCallbackHandler::get().handleWork(work_type, endpoint, parallel_data,
+                                        task_data, count, codeptr_ra);
+}
 
-  if (endpoint == ompt_scope_end || endpoint == ompt_scope_beginend)
-    OmptCallbackHandler::get().handleWorkEnd(work_type, endpoint, parallel_data,
-                                             task_data, count, codeptr_ra);
+static void on_ompt_callback_dispatch(ompt_data_t *parallel_data,
+                                      ompt_data_t *task_data,
+                                      ompt_dispatch_t kind,
+                                      ompt_data_t instance) {
+  OmptCallbackHandler::get().handleDispatch(parallel_data, task_data, kind,
+                                            instance);
+}
+
+static void on_ompt_callback_sync_region(ompt_sync_region_t kind,
+                                         ompt_scope_endpoint_t endpoint,
+                                         ompt_data_t *parallel_data,
+                                         ompt_data_t *task_data,
+                                         const void *codeptr_ra) {
+  OmptCallbackHandler::get().handleSyncRegion(kind, endpoint, parallel_data,
+                                              task_data, codeptr_ra);
 }
 
 /////// DEVICE-RELATED //////
@@ -283,7 +296,10 @@ static void on_ompt_callback_target_data_op_emi(
     const void *codeptr_ra) {
   assert(codeptr_ra != 0 && "Unexpected null codeptr");
   // Both src and dest must not be null
-  assert((src_addr != 0 || dest_addr != 0) && "Both src and dest addr null");
+  // However, for omp_target_alloc only the END call holds a value for one of
+  // the two entries
+  if (optype != ompt_target_data_alloc)
+    assert((src_addr != 0 || dest_addr != 0) && "Both src and dest addr null");
   if (endpoint == ompt_scope_begin)
     *host_op_id = NextOpId.fetch_add(1, std::memory_order_relaxed);
   OmptCallbackHandler::get().handleTargetDataOpEmi(
@@ -354,15 +370,26 @@ int ompt_initialize(ompt_function_lookup_t lookup, int initial_device_num,
   UseEMICallbacks = getBoolEnvironmentVariable("OMPTEST_USE_OMPT_EMI");
   UseTracing = getBoolEnvironmentVariable("OMPTEST_USE_OMPT_TRACING");
   RunAsTestSuite = getBoolEnvironmentVariable("OMPTEST_RUN_AS_TESTSUITE");
+  ColoredLog = getBoolEnvironmentVariable("OMPTEST_LOG_COLORED");
 
   register_ompt_callback(ompt_callback_thread_begin);
   register_ompt_callback(ompt_callback_thread_end);
   register_ompt_callback(ompt_callback_parallel_begin);
   register_ompt_callback(ompt_callback_parallel_end);
+  register_ompt_callback(ompt_callback_work);
+  // register_ompt_callback(ompt_callback_dispatch);
   register_ompt_callback(ompt_callback_task_create);
+  // register_ompt_callback(ompt_callback_dependences);
+  // register_ompt_callback(ompt_callback_task_dependence);
   register_ompt_callback(ompt_callback_task_schedule);
   register_ompt_callback(ompt_callback_implicit_task);
-  register_ompt_callback(ompt_callback_work);
+  // register_ompt_callback(ompt_callback_masked);
+  register_ompt_callback(ompt_callback_sync_region);
+  // register_ompt_callback(ompt_callback_mutex_acquire);
+  // register_ompt_callback(ompt_callback_mutex);
+  // register_ompt_callback(ompt_callback_nestLock);
+  // register_ompt_callback(ompt_callback_flush);
+  // register_ompt_callback(ompt_callback_cancel);
   register_ompt_callback(ompt_callback_device_initialize);
   register_ompt_callback(ompt_callback_device_finalize);
   register_ompt_callback(ompt_callback_device_load);
@@ -380,6 +407,9 @@ int ompt_initialize(ompt_function_lookup_t lookup, int initial_device_num,
     register_ompt_callback(ompt_callback_target_map);
   }
 
+  // Construct global logger instance
+  logging::Logger::get(logging::Level::WARNING, std::cerr, ColoredLog);
+
   // Construct & subscribe the reporter, so it will be notified of events
   EventReporter = new OmptEventReporter();
   OmptCallbackHandler::get().subscribe(EventReporter);
@@ -393,8 +423,10 @@ int ompt_initialize(ompt_function_lookup_t lookup, int initial_device_num,
 void ompt_finalize(ompt_data_t *tool_data) {
   assert(Handler && "Callback handler should be present at this point");
   assert(EventReporter && "EventReporter should be present at this point");
+  assert(Log && "Logger should be present at this point");
   delete Handler;
   delete EventReporter;
+  delete Log;
 }
 
 #ifdef __cplusplus
@@ -412,7 +444,7 @@ int start_trace(ompt_device_t *Device) {
   if (!ompt_start_trace)
     return 0;
 
-  // This device will be traced.
+  // This device will be traced
   assert(TracedDevices->find(Device) == TracedDevices->end() &&
          "Device already present in the map");
   TracedDevices->insert(Device);
@@ -427,9 +459,30 @@ int flush_trace(ompt_device_t *Device) {
   return ompt_flush_trace(Device);
 }
 
+int flush_traced_devices() {
+  if (!ompt_flush_trace || TracedDevices == nullptr)
+    return 0;
+
+  size_t NumFlushedDevices = 0;
+  for (auto Device : *TracedDevices)
+    if (ompt_flush_trace(Device) == 1)
+      ++NumFlushedDevices;
+
+  // Provide time to process triggered assert events
+  std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+  return (NumFlushedDevices == TracedDevices->size());
+}
+
 int stop_trace(ompt_device_t *Device) {
   if (!ompt_stop_trace)
     return 0;
+
+  // This device will not be traced anymore
+  assert(TracedDevices->find(Device) != TracedDevices->end() &&
+         "Device not present in the map");
+  TracedDevices->erase(Device);
+
   return ompt_stop_trace(Device);
 }
 

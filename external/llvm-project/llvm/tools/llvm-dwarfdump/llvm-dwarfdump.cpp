@@ -272,7 +272,7 @@ static cl::opt<bool>
                               "expressed in bytes."),
                      cat(DwarfDumpCategory));
 static cl::opt<bool> ManuallyGenerateUnitIndex(
-    "manaully-generate-unit-index",
+    "manually-generate-unit-index",
     cl::desc("if the input is dwp file, parse .debug_info "
              "section and use it to populate "
              "DW_SECT_INFO contributions in cu-index. "
@@ -512,7 +512,7 @@ static void filterByAccelName(ArrayRef<std::string> Names, DWARFContext &DICtx,
     getDies(DICtx, DICtx.getDebugNames(), Name, Dies);
   }
   llvm::sort(Dies);
-  Dies.erase(std::unique(Dies.begin(), Dies.end()), Dies.end());
+  Dies.erase(llvm::unique(Dies), Dies.end());
 
   DIDumpOptions DumpOpts = getDumpOpts(DICtx);
   DumpOpts.GetNameForDWARFReg = Callbacks.GetNameForDWARFReg;
@@ -522,36 +522,6 @@ static void filterByAccelName(ArrayRef<std::string> Names, DWARFContext &DICtx,
 }
 
 /// Print all DIEs in apple accelerator tables
-static void findAllApple(
-    DWARFContext &DICtx, raw_ostream &OS,
-    std::function<StringRef(uint64_t RegNum, bool IsEH)> GetNameForDWARFReg) {
-  MapVector<StringRef, llvm::SmallSet<DWARFDie, 2>> NameToDies;
-
-  auto PushDIEs = [&](const AppleAcceleratorTable &Accel) {
-    for (const auto &Entry : Accel.entries()) {
-      if (std::optional<uint64_t> Off = Entry.BaseEntry.getDIESectionOffset()) {
-        std::optional<StringRef> MaybeName = Entry.readName();
-        DWARFDie Die = DICtx.getDIEForOffset(*Off);
-        if (Die && MaybeName)
-          NameToDies[*MaybeName].insert(Die);
-      }
-    }
-  };
-
-  PushDIEs(DICtx.getAppleNames());
-  PushDIEs(DICtx.getAppleNamespaces());
-  PushDIEs(DICtx.getAppleTypes());
-
-  DIDumpOptions DumpOpts = getDumpOpts(DICtx);
-  DumpOpts.GetNameForDWARFReg = GetNameForDWARFReg;
-  for (const auto &[Name, Dies] : NameToDies) {
-    OS << llvm::formatv("\nApple accelerator entries with name = \"{0}\":\n",
-                        Name);
-    for (DWARFDie Die : Dies)
-      Die.dump(OS, 0, DumpOpts);
-  }
-}
-
 /// Handle the --lookup option and dump the DIEs and line info for the given
 /// address.
 /// TODO: specified Address for --lookup option could relate for several
@@ -657,7 +627,7 @@ static bool collectObjectSources(ObjectFile &Obj, DWARFContext &DICtx,
 
   // Dedup and order the sources.
   llvm::sort(Sources);
-  Sources.erase(std::unique(Sources.begin(), Sources.end()), Sources.end());
+  Sources.erase(llvm::unique(Sources), Sources.end());
 
   for (StringRef Name : Sources)
     OS << Name << "\n";

@@ -9,17 +9,16 @@ define void  @t1(i32 %a, ptr %P) nounwind {
 ; X86-LABEL: t1:
 ; X86:       # %bb.0:
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
-; X86-NEXT:    movl {{[0-9]+}}(%esp), %ecx
-; X86-NEXT:    shll $12, %ecx
-; X86-NEXT:    movd %ecx, %xmm0
+; X86-NEXT:    movd {{.*#+}} xmm0 = mem[0],zero,zero,zero
+; X86-NEXT:    pslld $12, %xmm0
 ; X86-NEXT:    psllq $32, %xmm0
 ; X86-NEXT:    movq %xmm0, (%eax)
 ; X86-NEXT:    retl
 ;
 ; X64-LABEL: t1:
 ; X64:       # %bb.0:
-; X64-NEXT:    shll $12, %edi
 ; X64-NEXT:    movd %edi, %xmm0
+; X64-NEXT:    pslld $12, %xmm0
 ; X64-NEXT:    psllq $32, %xmm0
 ; X64-NEXT:    movq %xmm0, (%rsi)
 ; X64-NEXT:    retq
@@ -27,7 +26,7 @@ define void  @t1(i32 %a, ptr %P) nounwind {
  %tmp21 = insertelement <2 x i32> undef, i32 %tmp12, i32 1
  %tmp22 = insertelement <2 x i32> %tmp21, i32 0, i32 0
  %tmp23 = bitcast <2 x i32> %tmp22 to x86_mmx
- store x86_mmx %tmp23, x86_mmx* %P
+ store x86_mmx %tmp23, ptr %P
  ret void
 }
 
@@ -48,7 +47,7 @@ define <4 x float> @t2(ptr %P) nounwind {
 ; X64-NEXT:    unpcklpd {{.*#+}} xmm1 = xmm1[0],mem[0]
 ; X64-NEXT:    shufps {{.*#+}} xmm0 = xmm0[0,1],xmm1[0,2]
 ; X64-NEXT:    retq
-  %tmp1 = load <4 x float>, <4 x float>* %P
+  %tmp1 = load <4 x float>, ptr %P
   %tmp2 = shufflevector <4 x float> %tmp1, <4 x float> zeroinitializer, <4 x i32> < i32 4, i32 4, i32 4, i32 0 >
   ret <4 x float> %tmp2
 }
@@ -66,7 +65,7 @@ define <4 x float> @t3(ptr %P) nounwind {
 ; X64-NEXT:    xorps %xmm0, %xmm0
 ; X64-NEXT:    movlps {{.*#+}} xmm0 = mem[0,1],xmm0[2,3]
 ; X64-NEXT:    retq
-  %tmp1 = load <4 x float>, <4 x float>* %P
+  %tmp1 = load <4 x float>, ptr %P
   %tmp2 = shufflevector <4 x float> %tmp1, <4 x float> zeroinitializer, <4 x i32> < i32 2, i32 3, i32 4, i32 4 >
   ret <4 x float> %tmp2
 }
@@ -88,7 +87,7 @@ define <4 x float> @t4(ptr %P) nounwind {
 ; X64-NEXT:    shufps {{.*#+}} xmm0 = xmm0[1,0],mem[3,0]
 ; X64-NEXT:    shufps {{.*#+}} xmm0 = xmm0[2,0],xmm1[2,3]
 ; X64-NEXT:    retq
-  %tmp1 = load <4 x float>, <4 x float>* %P
+  %tmp1 = load <4 x float>, ptr %P
   %tmp2 = shufflevector <4 x float> zeroinitializer, <4 x float> %tmp1, <4 x i32> < i32 7, i32 0, i32 0, i32 0 >
   ret <4 x float> %tmp2
 }
@@ -118,7 +117,7 @@ define <4 x float> @t4_under_aligned(ptr %P) nounwind {
 ; UNALIGN-NEXT:    shufps {{.*#+}} xmm0 = xmm0[1,0],mem[3,0]
 ; UNALIGN-NEXT:    shufps {{.*#+}} xmm0 = xmm0[2,0],xmm1[2,3]
 ; UNALIGN-NEXT:    retq
-  %tmp1 = load <4 x float>, <4 x float>* %P, align 4
+  %tmp1 = load <4 x float>, ptr %P, align 4
   %tmp2 = shufflevector <4 x float> zeroinitializer, <4 x float> %tmp1, <4 x i32> < i32 7, i32 0, i32 0, i32 0 >
   ret <4 x float> %tmp2
 }

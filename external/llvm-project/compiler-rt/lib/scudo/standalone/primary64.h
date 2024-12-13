@@ -147,6 +147,9 @@ public:
     for (uptr I = 0; I < NumClasses; I++)
       getRegionInfo(I)->FLLockCV.bindTestOnly(getRegionInfo(I)->FLLock);
 
+    // The default value in the primary config has the higher priority.
+    if (Config::getDefaultReleaseToOsIntervalMs() != INT32_MIN)
+      ReleaseToOsInterval = Config::getDefaultReleaseToOsIntervalMs();
     setOption(Option::ReleaseInterval, static_cast<sptr>(ReleaseToOsInterval));
   }
 
@@ -157,7 +160,7 @@ public:
         ScopedLock ML(Region->MMLock);
         MemMapT MemMap = Region->MemMapInfo.MemMap;
         if (MemMap.isAllocated())
-          MemMap.unmap(MemMap.getBase(), MemMap.getCapacity());
+          MemMap.unmap();
       }
       *Region = {};
     }
@@ -389,6 +392,18 @@ public:
       RegionInfo *Region = getRegionInfo(I);
       ScopedLock L(Region->MMLock);
       getRegionFragmentationInfo(Region, I, Str);
+    }
+  }
+
+  void getMemoryGroupFragmentationInfo(ScopedString *Str) {
+    Str->append(
+        "Fragmentation Stats: SizeClassAllocator64: page size = %zu bytes\n",
+        getPageSizeCached());
+
+    for (uptr I = 1; I < NumClasses; I++) {
+      RegionInfo *Region = getRegionInfo(I);
+      ScopedLock L(Region->MMLock);
+      getMemoryGroupFragmentationInfoInRegion(Region, I, Str);
     }
   }
 
@@ -884,9 +899,10 @@ private:
         ScopedLock ML(Region->MMLock);
 
         const bool RegionIsExhausted = Region->Exhausted;
-        if (!RegionIsExhausted)
+        if (!RegionIsExhausted) {
           PopCount = populateFreeListAndPopBlocks(C, ClassId, Region, ToArray,
                                                   MaxBlockCount);
+        }
         ReportRegionExhausted = !RegionIsExhausted && Region->Exhausted;
 
         {
@@ -1019,7 +1035,6 @@ private:
                                           MAP_ALLOWNOMEM))) {
         Printf("Can't reserve pages for size class %zu.\n",
                getSizeByClassId(ClassId));
-        Region->Exhausted = true;
         return 0U;
       }
       initRegion(Region, ClassId,
@@ -1182,12 +1197,56 @@ private:
 
     uptr Integral;
     uptr Fractional;
-    computePercentage(BlockSize * InUseBlocks, InUsePages * PageSize, &Integral,
+    computePercentage(BlockSize * InUseBlocks, InUseBytes, &Integral,
                       &Fractional);
     Str->append("  %02zu (%6zu): inuse/total blocks: %6zu/%6zu inuse/total "
                 "pages: %6zu/%6zu inuse bytes: %6zuK util: %3zu.%02zu%%\n",
                 ClassId, BlockSize, InUseBlocks, TotalBlocks, InUsePages,
                 AllocatedPagesCount, InUseBytes >> 10, Integral, Fractional);
+  }
+
+  void getMemoryGroupFragmentationInfoInRegion(RegionInfo *Region, uptr ClassId,
+                                               ScopedString *Str)
+      REQUIRES(Region->MMLock) EXCLUDES(Region->FLLock) {
+    const uptr BlockSize = getSizeByClassId(ClassId);
+    const uptr AllocatedUserEnd =
+        Region->MemMapInfo.AllocatedUser + Region->RegionBeg;
+
+    SinglyLinkedList<BatchGroupT> GroupsToRelease;
+    {
+      ScopedLock L(Region->FLLock);
+      GroupsToRelease = Region->FreeListInfo.BlockList;
+      Region->FreeListInfo.BlockList.clear();
+    }
+
+    constexpr uptr GroupSize = (1UL << GroupSizeLog);
+    constexpr uptr MaxNumGroups = RegionSize / GroupSize;
+
+    MemoryGroupFragmentationRecorder<GroupSize, MaxNumGroups> Recorder;
+    if (!GroupsToRelease.empty()) {
+      PageReleaseContext Context =
+          markFreeBlocks(Region, BlockSize, AllocatedUserEnd,
+                         getCompactPtrBaseByClassId(ClassId), GroupsToRelease);
+      auto SkipRegion = [](UNUSED uptr RegionIndex) { return false; };
+      releaseFreeMemoryToOS(Context, Recorder, SkipRegion);
+
+      mergeGroupsToReleaseBack(Region, GroupsToRelease);
+    }
+
+    Str->append("MemoryGroupFragmentationInfo in Region %zu (%zu)\n", ClassId,
+                BlockSize);
+
+    const uptr MaxNumGroupsInUse =
+        roundUp(Region->MemMapInfo.AllocatedUser, GroupSize) / GroupSize;
+    for (uptr I = 0; I < MaxNumGroupsInUse; ++I) {
+      uptr Integral;
+      uptr Fractional;
+      computePercentage(Recorder.NumPagesInOneGroup -
+                            Recorder.getNumFreePages(I),
+                        Recorder.NumPagesInOneGroup, &Integral, &Fractional);
+      Str->append("MemoryGroup #%zu (0x%zx): util: %3zu.%02zu%%\n", I,
+                  Region->RegionBeg + I * GroupSize, Integral, Fractional);
+    }
   }
 
   NOINLINE uptr releaseToOSMaybe(RegionInfo *Region, uptr ClassId,
@@ -1389,7 +1448,7 @@ private:
         continue;
       }
 
-      const uptr PushedBytesDelta = BG->BytesInBGAtLastCheckpoint - BytesInBG;
+      const uptr PushedBytesDelta = BytesInBG - BG->BytesInBGAtLastCheckpoint;
 
       // Given the randomness property, we try to release the pages only if the
       // bytes used by free blocks exceed certain proportion of group size. Note

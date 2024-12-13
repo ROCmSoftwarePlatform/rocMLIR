@@ -13,6 +13,7 @@
 #include "llvm/IR/Function.h"
 #include "SymbolTableListTraitsImpl.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
@@ -79,9 +80,32 @@ using ProfileCount = Function::ProfileCount;
 // are not in the public header file...
 template class llvm::SymbolTableListTraits<BasicBlock>;
 
-static cl::opt<unsigned> NonGlobalValueMaxNameSize(
+static cl::opt<int> NonGlobalValueMaxNameSize(
     "non-global-value-max-name-size", cl::Hidden, cl::init(1024),
     cl::desc("Maximum size for the name of non-global values."));
+
+extern cl::opt<bool> UseNewDbgInfoFormat;
+
+void Function::renumberBlocks() {
+  validateBlockNumbers();
+
+  NextBlockNum = 0;
+  for (auto &BB : *this)
+    BB.Number = NextBlockNum++;
+  BlockNumEpoch++;
+}
+
+void Function::validateBlockNumbers() const {
+#ifndef NDEBUG
+  BitVector Numbers(NextBlockNum);
+  for (const auto &BB : *this) {
+    unsigned Num = BB.getNumber();
+    assert(Num < NextBlockNum && "out of range block number");
+    assert(!Numbers[Num] && "duplicate block numbers");
+    Numbers.set(Num);
+  }
+#endif
+}
 
 void Function::convertToNewDbgValues() {
   IsNewDbgInfoFormat = true;
@@ -357,6 +381,10 @@ LLVMContext &Function::getContext() const {
   return getType()->getContext();
 }
 
+const DataLayout &Function::getDataLayout() const {
+  return getParent()->getDataLayout();
+}
+
 unsigned Function::getInstructionCount() const {
   unsigned NumInstrs = 0;
   for (const BasicBlock &BB : BasicBlocks)
@@ -374,7 +402,7 @@ Function *Function::createWithDefaultAttr(FunctionType *Ty,
                                           LinkageTypes Linkage,
                                           unsigned AddrSpace, const Twine &N,
                                           Module *M) {
-  auto *F = new Function(Ty, Linkage, AddrSpace, N, M);
+  auto *F = new (AllocMarker) Function(Ty, Linkage, AddrSpace, N, M);
   AttrBuilder B(F->getContext());
   UWTableKind UWTable = M->getUwtable();
   if (UWTable != UWTableKind::None)
@@ -382,6 +410,9 @@ Function *Function::createWithDefaultAttr(FunctionType *Ty,
   switch (M->getFramePointer()) {
   case FramePointerKind::None:
     // 0 ("none") is the default.
+    break;
+  case FramePointerKind::Reserved:
+    B.addAttribute("frame-pointer", "reserved");
     break;
   case FramePointerKind::NonLeaf:
     B.addAttribute("frame-pointer", "non-leaf");
@@ -392,6 +423,41 @@ Function *Function::createWithDefaultAttr(FunctionType *Ty,
   }
   if (M->getModuleFlag("function_return_thunk_extern"))
     B.addAttribute(Attribute::FnRetThunkExtern);
+  StringRef DefaultCPU = F->getContext().getDefaultTargetCPU();
+  if (!DefaultCPU.empty())
+    B.addAttribute("target-cpu", DefaultCPU);
+  StringRef DefaultFeatures = F->getContext().getDefaultTargetFeatures();
+  if (!DefaultFeatures.empty())
+    B.addAttribute("target-features", DefaultFeatures);
+
+  // Check if the module attribute is present and not zero.
+  auto isModuleAttributeSet = [&](const StringRef &ModAttr) -> bool {
+    const auto *Attr =
+        mdconst::extract_or_null<ConstantInt>(M->getModuleFlag(ModAttr));
+    return Attr && !Attr->isZero();
+  };
+
+  auto AddAttributeIfSet = [&](const StringRef &ModAttr) {
+    if (isModuleAttributeSet(ModAttr))
+      B.addAttribute(ModAttr);
+  };
+
+  StringRef SignType = "none";
+  if (isModuleAttributeSet("sign-return-address"))
+    SignType = "non-leaf";
+  if (isModuleAttributeSet("sign-return-address-all"))
+    SignType = "all";
+  if (SignType != "none") {
+    B.addAttribute("sign-return-address", SignType);
+    B.addAttribute("sign-return-address-key",
+                   isModuleAttributeSet("sign-return-address-with-bkey")
+                       ? "b_key"
+                       : "a_key");
+  }
+  AddAttributeIfSet("branch-target-enforcement");
+  AddAttributeIfSet("branch-protection-pauth-lr");
+  AddAttributeIfSet("guarded-control-stack");
+
   F->addFnAttrs(B);
   return F;
 }
@@ -435,10 +501,9 @@ static unsigned computeAddrSpace(unsigned AddrSpace, Module *M) {
 
 Function::Function(FunctionType *Ty, LinkageTypes Linkage, unsigned AddrSpace,
                    const Twine &name, Module *ParentModule)
-    : GlobalObject(Ty, Value::FunctionVal,
-                   OperandTraits<Function>::op_begin(this), 0, Linkage, name,
+    : GlobalObject(Ty, Value::FunctionVal, AllocMarker, Linkage, name,
                    computeAddrSpace(AddrSpace, ParentModule)),
-      NumArgs(Ty->getNumParams()), IsNewDbgInfoFormat(false) {
+      NumArgs(Ty->getNumParams()), IsNewDbgInfoFormat(UseNewDbgInfoFormat) {
   assert(FunctionType::isValidReturnType(getReturnType()) &&
          "invalid return type");
   setGlobalObjectSubClassData(0);
@@ -465,6 +530,8 @@ Function::Function(FunctionType *Ty, LinkageTypes Linkage, unsigned AddrSpace,
 }
 
 Function::~Function() {
+  validateBlockNumbers();
+
   dropAllReferences();    // After this it is safe to delete instructions.
 
   // Delete all of the method arguments and unlink from symbol table...
@@ -733,6 +800,10 @@ void Function::addDereferenceableOrNullParamAttr(unsigned ArgNo,
                                                  uint64_t Bytes) {
   AttributeSets = AttributeSets.addDereferenceableOrNullParamAttr(getContext(),
                                                                   ArgNo, Bytes);
+}
+
+void Function::addRangeRetAttr(const ConstantRange &CR) {
+  AttributeSets = AttributeSets.addRangeRetAttr(getContext(), CR);
 }
 
 DenormalMode Function::getDenormalMode(const fltSemantics &FPType) const {
@@ -1308,22 +1379,24 @@ static void DecodeIITType(unsigned &NextElt, ArrayRef<unsigned char> Infos,
 
 void Intrinsic::getIntrinsicInfoTableEntries(ID id,
                                              SmallVectorImpl<IITDescriptor> &T){
+  static_assert(sizeof(IIT_Table[0]) == 2,
+                "Expect 16-bit entries in IIT_Table");
   // Check to see if the intrinsic's type was expressible by the table.
-  unsigned TableVal = IIT_Table[id-1];
+  uint16_t TableVal = IIT_Table[id - 1];
 
   // Decode the TableVal into an array of IITValues.
-  SmallVector<unsigned char, 8> IITValues;
+  SmallVector<unsigned char> IITValues;
   ArrayRef<unsigned char> IITEntries;
   unsigned NextElt = 0;
-  if ((TableVal >> 31) != 0) {
+  if (TableVal >> 15) {
     // This is an offset into the IIT_LongEncodingTable.
     IITEntries = IIT_LongEncodingTable;
 
     // Strip sentinel bit.
-    NextElt = (TableVal << 1) >> 1;
+    NextElt = TableVal & 0x7fff;
   } else {
-    // Decode the TableVal into an array of IITValues.  If the entry was encoded
-    // into a single word in the table itself, decode it now.
+    // If the entry was encoded into a single word in the table itself, decode
+    // it from an array of nibbles to an array of bytes.
     do {
       IITValues.push_back(TableVal & 0xF);
       TableVal >>= 4;
@@ -1487,7 +1560,19 @@ bool Intrinsic::isConstrainedFPIntrinsic(ID QID) {
 #define INSTRUCTION(NAME, NARG, ROUND_MODE, INTRINSIC)                         \
   case Intrinsic::INTRINSIC:
 #include "llvm/IR/ConstrainedOps.def"
+#undef INSTRUCTION
     return true;
+  default:
+    return false;
+  }
+}
+
+bool Intrinsic::hasConstrainedFPRoundingModeOperand(Intrinsic::ID QID) {
+  switch (QID) {
+#define INSTRUCTION(NAME, NARG, ROUND_MODE, INTRINSIC)                         \
+  case Intrinsic::INTRINSIC:                                                   \
+    return ROUND_MODE == 1;
+#include "llvm/IR/ConstrainedOps.def"
 #undef INSTRUCTION
   default:
     return false;
@@ -1843,8 +1928,8 @@ bool Function::hasAddressTaken(const User **PutOffender,
         if (llvm::all_of(FUU->users(), [](const User *U) {
               if (const auto *GV = dyn_cast<GlobalVariable>(U))
                 return GV->hasName() &&
-                       (GV->getName().equals("llvm.compiler.used") ||
-                        GV->getName().equals("llvm.used"));
+                       (GV->getName() == "llvm.compiler.used" ||
+                        GV->getName() == "llvm.used");
               return false;
             }))
           continue;
@@ -1989,7 +2074,7 @@ std::optional<ProfileCount> Function::getEntryCount(bool AllowSynthetic) const {
   MDNode *MD = getMetadata(LLVMContext::MD_prof);
   if (MD && MD->getOperand(0))
     if (MDString *MDS = dyn_cast<MDString>(MD->getOperand(0))) {
-      if (MDS->getString().equals("function_entry_count")) {
+      if (MDS->getString() == "function_entry_count") {
         ConstantInt *CI = mdconst::extract<ConstantInt>(MD->getOperand(1));
         uint64_t Count = CI->getValue().getZExtValue();
         // A value of -1 is used for SamplePGO when there were no samples.
@@ -1998,7 +2083,7 @@ std::optional<ProfileCount> Function::getEntryCount(bool AllowSynthetic) const {
           return std::nullopt;
         return ProfileCount(Count, PCT_Real);
       } else if (AllowSynthetic &&
-                 MDS->getString().equals("synthetic_function_entry_count")) {
+                 MDS->getString() == "synthetic_function_entry_count") {
         ConstantInt *CI = mdconst::extract<ConstantInt>(MD->getOperand(1));
         uint64_t Count = CI->getValue().getZExtValue();
         return ProfileCount(Count, PCT_Synthetic);
@@ -2011,7 +2096,7 @@ DenseSet<GlobalValue::GUID> Function::getImportGUIDs() const {
   DenseSet<GlobalValue::GUID> R;
   if (MDNode *MD = getMetadata(LLVMContext::MD_prof))
     if (MDString *MDS = dyn_cast<MDString>(MD->getOperand(0)))
-      if (MDS->getString().equals("function_entry_count"))
+      if (MDS->getString() == "function_entry_count")
         for (unsigned i = 2; i < MD->getNumOperands(); i++)
           R.insert(mdconst::extract<ConstantInt>(MD->getOperand(i))
                        ->getValue()
@@ -2027,9 +2112,8 @@ void Function::setSectionPrefix(StringRef Prefix) {
 
 std::optional<StringRef> Function::getSectionPrefix() const {
   if (MDNode *MD = getMetadata(LLVMContext::MD_section_prefix)) {
-    assert(cast<MDString>(MD->getOperand(0))
-               ->getString()
-               .equals("function_section_prefix") &&
+    assert(cast<MDString>(MD->getOperand(0))->getString() ==
+               "function_section_prefix" &&
            "Metadata not match");
     return cast<MDString>(MD->getOperand(1))->getString();
   }

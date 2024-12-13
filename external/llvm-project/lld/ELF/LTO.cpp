@@ -135,6 +135,7 @@ static lto::Config createConfig() {
       config->ltoValidateAllVtablesHaveTypeInfos;
   c.AllVtablesHaveTypeInfos = ctx.ltoAllVtablesHaveTypeInfos;
   c.AlwaysEmitRegularLTOObj = !config->ltoObjPath.empty();
+  c.KeepSymbolNameCopies = false;
 
   for (const llvm::StringRef &name : config->thinLTOModulesToCompile)
     c.ThinLTOModulesToCompile.emplace_back(name);
@@ -147,7 +148,7 @@ static lto::Config createConfig() {
   c.PGOWarnMismatch = config->ltoPGOWarnMismatch;
 
   if (config->emitLLVM) {
-    c.PostInternalizeModuleHook = [](size_t task, const Module &m) {
+    c.PreCodeGenModuleHook = [](size_t task, const Module &m) {
       if (std::unique_ptr<raw_fd_ostream> os =
               openLTOOutputFile(config->outputFile))
         WriteBitcodeToFile(m, *os, false);
@@ -157,6 +158,8 @@ static lto::Config createConfig() {
 
   if (config->ltoEmitAsm) {
     c.CGFileType = CodeGenFileType::AssemblyFile;
+  }
+  if (config->ltoEmitAsm || config->saveTempsArgs.contains("asm")) {
     c.Options.MCOptions.AsmVerbose = true;
   }
 

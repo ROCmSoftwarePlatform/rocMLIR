@@ -33,25 +33,30 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 
+#include "PluginInterface.h"
+
+using GenericPluginTy = llvm::omp::target::plugin::GenericPluginTy;
+
 // Forward declarations.
-struct PluginAdaptorTy;
 struct __tgt_bin_desc;
 struct __tgt_target_table;
 
 struct DeviceTy {
   int32_t DeviceID;
-  PluginAdaptorTy *RTL;
+  GenericPluginTy *RTL;
   int32_t RTLDeviceID;
   /// The physical number of processors that may concurrently execute a team
   /// For cuda, this is number of SMs, for amdgcn, this is number of CUs.
   /// This field is used by ompx_get_team_procs(devid).
   int32_t TeamProcs;
 
+
   /// Flag to force synchronous data transfers
   /// Controlled via environment flag OMPX_FORCE_SYNC_REGIONS
   bool ForceSynchronousTargetRegions = false;
 
-  DeviceTy(PluginAdaptorTy *RTL, int32_t DeviceID, int32_t RTLDeviceID);
+
+  DeviceTy(GenericPluginTy *RTL, int32_t DeviceID, int32_t RTLDeviceID);
   // DeviceTy is not copyable
   DeviceTy(const DeviceTy &D) = delete;
   DeviceTy &operator=(const DeviceTy &D) = delete;
@@ -164,12 +169,28 @@ struct DeviceTy {
   /// Ask the device whether it is an APU.
   bool checkIfAPU();
 
+  bool checkIfGFX90a();
+
+  bool checkIfMI300x();
+
   /// Ask the device whether it supports unified memory.
   bool supportsUnifiedMemory();
 
   /// Ask the device to perform sanity checks for zero-copy configurations.
   void zeroCopySanityChecksAndDiag(bool isUnifiedSharedMemory,
                                    bool isAutoZeroCopy, bool isEagerMaps);
+
+  /// Check if there are pending images for this device.
+  bool hasPendingImages() const { return HasPendingImages; }
+
+  /// Indicate that there are pending images for this device or not.
+  void setHasPendingImages(bool V) { HasPendingImages = V; }
+
+  /// Get number of devices used for multi-device kernels
+  uint32_t getNumMultiDevices() const;
+
+  /// Check if the kernel is multi device
+  bool isMultiDeviceKernel(void *TgtEntryPtr);
 
 private:
   /// Deinitialize the device (and plugin).
@@ -182,6 +203,9 @@ private:
 
   /// Handler to collect and organize host-2-device mapping information.
   MappingInfoTy MappingInfo;
+
+  /// Flag to indicate pending images (true after construction).
+  bool HasPendingImages = true;
 };
 
 #endif
