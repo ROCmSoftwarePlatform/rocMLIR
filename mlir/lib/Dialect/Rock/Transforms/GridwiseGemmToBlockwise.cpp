@@ -2713,6 +2713,8 @@ struct GridwiseGemmAccelRewritePattern
     if (failed(maybeVecDimInfoB)) {
       return failure();
     }
+    auto copyMPerThread = maybeVecDimInfoA->inDPerThread;
+    auto copyNPerThread = maybeVecDimInfoB->inDPerThread;
     LLVM_DEBUG(llvm::dbgs()
                << "gridSize: " << gridSize << "\n"
                << "blockSize: " << blockSize << "\n"
@@ -2777,6 +2779,17 @@ struct GridwiseGemmAccelRewritePattern
 
     bool isKContiguousDimA = maybeVecDimInfoA->vectorDim == GemmDimension::K;
     bool isKContiguousDimB = maybeVecDimInfoB->vectorDim == GemmDimension::K;
+    // LDS bank conflicts parameters
+    int64_t maxVlenA = 128 / elementTypeA.getIntOrFloatBitWidth();
+    int64_t maxVlenB = 128 / elementTypeB.getIntOrFloatBitWidth();
+    // If kpack is less than the hardware max vector length, and we are
+    // writing more contiguous kpack elements, there is a possibility to
+    // vectorize that we want to preserve (i.e., we favour vectorization over
+    // bank conflicts resolution)
+    bool isPossibleToVectorizeA = (kpack < maxVlenA && copyMPerThread > 1);
+    bool isPossibleToVectorizeB = (kpack < maxVlenB && copyNPerThread > 1);
+    bool rotateMWithK = isKContiguousDimA && !isPossibleToVectorizeA;
+    bool rotateNWithK = isKContiguousDimB && !isPossibleToVectorizeB;
     LDSLayoutConfigDim ldsLayoutConfigA =
         getLDSLayoutConfigDim(elementTypeA, kpack, maybeVecDimInfoA.value());
     LDSLayoutConfigDim ldsLayoutConfigB =
