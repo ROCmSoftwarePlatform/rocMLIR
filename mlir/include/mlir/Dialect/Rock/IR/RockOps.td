@@ -208,12 +208,12 @@ def Rock_ReduceOp :
 def Rock_AttentionOp :
   Rock_Op<"attention", [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>, RockFusionRoot, AttrSizedOperandSegments]>,
   Arguments<(ins
-    TensorOrMemRefOf<[F32, F16, I8]>:$queries,
-    TensorOrMemRefOf<[F32, F16, I8]>:$keys,
-    TensorOrMemRefOf<[F32, F16]>:$values,
-    Variadic<TensorOrMemRefOf<[F32, F16, I8]>>:$preSoftmaxElemWiseInputs,
+    TensorOrMemRefOf<[F32, F16, BF16, I8]>:$queries,
+    TensorOrMemRefOf<[F32, F16, BF16, I8]>:$keys,
+    TensorOrMemRefOf<[F32, F16, BF16]>:$values,
+    Variadic<TensorOrMemRefOf<[F32, F16, BF16, I8]>>:$preSoftmaxElemWiseInputs,
     Optional<TensorOrMemRefOf<[I32]>>:$currentSeqLen,
-    TensorOrMemRefOf<[F32, F16]>:$out,
+    TensorOrMemRefOf<[F32, BF16, F16]>:$out,
     UnitAttr:$qTransposed,
     UnitAttr:$kTransposed,
     UnitAttr:$vTransposed,
@@ -225,7 +225,7 @@ def Rock_AttentionOp :
     OptionalAttr<RockTuningParamAttrInterface>:$params1,
     I32Attr:$firstGemmIdx
   )>,
-  Results<(outs Optional<TensorOf<[F32, F16]>>:$result)> {
+  Results<(outs Optional<TensorOf<[F32, F16, BF16]>>:$result)> {
   let summary = "Attention operation of transformer models";
   let description = [{
     Performs the operation out = SOFTMAX((queries * keys) .* scale) * values.
@@ -434,12 +434,12 @@ def Rock_GridwiseGemmAccelOp :
 // gridwise_attention_accel
 def Rock_GridwiseAttentionAccelOp :
     Rock_Op<"gridwise_attention_accel", [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>, RockFusionRoot, AttrSizedOperandSegments]>,
-    Arguments<(ins MemRefRankOf<[F32, F16, I8], [3]>:$queries,
-                   MemRefRankOf<[F32, F16, I8], [3]>:$keys,
-                   MemRefRankOf<[F32, F16], [3]>:$values,
-                   Variadic<TensorOrMemRefOf<[F32, F16, I8]>>:$preSoftmaxElemWiseInputs,
+    Arguments<(ins MemRefRankOf<[F32, F16, BF16, I8], [3]>:$queries,
+                   MemRefRankOf<[F32, F16, BF16, I8], [3]>:$keys,
+                   MemRefRankOf<[F32, F16, BF16,], [3]>:$values,
+                   Variadic<TensorOrMemRefOf<[F32, F16, BF16, I8]>>:$preSoftmaxElemWiseInputs,
                    Optional<MemRefRankOf<[I32], [1]>>:$currentSeqLen,
-                   MemRefRankOf<[F32, F16], [3]>:$out,
+                   MemRefRankOf<[F32, F16, BF16], [3]>:$out,
                    StrAttr:$arch,
                    Rock_GemmFeaturesAttr:$features,
                    I32Attr:$blockSize,
