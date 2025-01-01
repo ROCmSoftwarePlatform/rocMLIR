@@ -61,7 +61,7 @@ void getAndBuildMIGraphX(String cmakeOpts) {
 }
 
 String dockerImageCIMIGraphX() {
-    return 'rocm/mlir-migraphx-ci:rocm6.2-latest'
+    return 'rocm/mlir-migraphx-ci:rocm6.3-latest'
 }
 
 String dockerArgs() {
