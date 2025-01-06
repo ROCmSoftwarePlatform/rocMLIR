@@ -2928,7 +2928,7 @@ struct GridwiseGemmAccelRewritePattern
     // TODO: add an heuristic to decide if the ii should be 1 or 2. This is for
     // now not worth it, since any form of double buffering results in poor
     // assembly begin generated. So we need to stick with II=2
-    int64_t initiationInterval = 2;
+    int64_t initiationInterval = 1;
 
     // Logic to setup buffers for blockwise_gemm_accel.
     int64_t arrayALen = kBasePerThread;
