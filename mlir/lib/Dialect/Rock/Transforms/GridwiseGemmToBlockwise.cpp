@@ -176,6 +176,7 @@ static FailureOr<Value> wrapLDSBufferForStore(OpBuilder &b, Location loc,
            << " elements but has " << bufferShape[0];
   }
   int64_t kpackPerThread = std::min(kPerThread, kpack);
+  assert(kpack % kpackPerThread == 0);
   int64_t threadsPerKpack = kpack / kpackPerThread;
 
   Type ldsWriteType = vectorTypeOrSelf(dataType, kpackPerThread);

@@ -318,6 +318,7 @@ FailureOr<RegsAsMatrixSubTiles> mlir::rock::getPackedRegsAsTileViews(
   int64_t dThreads = dPerBlock / dPerThread;
 
   int64_t kpackPerThread = std::min(kPerThread, kpack);
+  assert(kPerThread % kpackPerThread == 0);
   int64_t kOuterPerThread = kPerThread / kpackPerThread;
 
   RegsAsMatrixSubTiles gpuViews;
