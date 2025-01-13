@@ -247,4 +247,17 @@ void RockPrepareLLVMPass::runOnOperation() {
     patterns.add<SelectExtractRewritePattern>(patterns.getContext());
     (void)applyPatternsAndFoldGreedily(func, std::move(patterns));
   }
+
+  // 6. find main loop and add IglpOpt
+  SmallVector<Operation*> mfmas;
+  func.walk([&](Operation* op) {
+    if (op->getName().getDialectNamespace() == "rocdl" &&  op->getName().getStringRef().contains("mfma")) {
+      mfmas.push_back(op);
+    }
+  });
+  for(Operation* mfma : mfmas) {
+    Block* block = mfma->getBlock();
+    b.setInsertionPointToStart(block);
+    b.create<ROCDL::IglpOpt>(mfma->getLoc(), b.getI32IntegerAttr(0));
+  }
 }

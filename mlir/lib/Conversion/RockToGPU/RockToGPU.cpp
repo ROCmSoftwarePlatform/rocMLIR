@@ -438,13 +438,13 @@ void LowerRockOpsToGPUPass::runOnOperation() {
       // analysis
       constexpr int64_t wavesPerEUUpperBound = 2;
       wavesPerEU = std::min(wavesPerEU, wavesPerEUUpperBound);
-      if (wavesPerEU > 1) {
-        LLVM_DEBUG(llvm::dbgs() << "waves_per_eu:" << wavesPerEU << "\n");
-        gpuFunc->setAttr("rocdl.waves_per_eu", b.getI32IntegerAttr(wavesPerEU));
-      } else {
-        LLVM_DEBUG(llvm::dbgs() << "waves_per_eu not set"
-                                << "\n");
-      }
+      // if (wavesPerEU > 1) {
+      LLVM_DEBUG(llvm::dbgs() << "waves_per_eu:" << wavesPerEU << "\n");
+      gpuFunc->setAttr("rocdl.waves_per_eu", b.getI32IntegerAttr(wavesPerEU));
+      // } else {
+      //   LLVM_DEBUG(llvm::dbgs() << "waves_per_eu not set"
+      //                           << "\n");
+      // }
     } else {
       LLVM_DEBUG(llvm::dbgs() << "arch not found.\n");
     }

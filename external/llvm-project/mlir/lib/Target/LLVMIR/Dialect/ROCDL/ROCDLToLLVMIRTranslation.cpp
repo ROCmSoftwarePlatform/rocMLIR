@@ -138,7 +138,8 @@ public:
           moduleTranslation.lookupFunction(func.getName());
       llvm::SmallString<8> llvmAttrValue;
       llvm::raw_svector_ostream attrValueStream(llvmAttrValue);
-      attrValueStream << value.getInt();
+      //attrValueStream << value.getInt();
+      attrValueStream << "1,1";
       llvmFunc->addFnAttr("amdgpu-waves-per-eu", llvmAttrValue);
     }
     if (dialect->getFlatWorkGroupSizeAttrHelper().getName() ==
