@@ -10,7 +10,6 @@
 #define MLIR_DIALECT_ROCK_UTILITY_AMDARCHDB_H
 
 #include "mlir/Dialect/Rock/IR/Rock.h"
-#include "mlir/Dialect/Rock/IR/RockTypes.h"
 #include "mlir/Support/LLVM.h"
 
 namespace mlir {
