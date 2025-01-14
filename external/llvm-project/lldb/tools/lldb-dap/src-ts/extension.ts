@@ -25,20 +25,28 @@ function createDefaultLLDBDapOptions(): LLDBDapOptions {
       if (log_path) {
         env["LLDBDAP_LOG"] = log_path;
       }
-
+      const configEnvironment =
+          config.get<{[key: string] : string}>("environment") || {};
       if (path) {
-        return new vscode.DebugAdapterExecutable(path, [], { env });
+        const dbgOptions = {
+          env : {
+            ...configEnvironment,
+            ...env,
+          }
+        };
+        return new vscode.DebugAdapterExecutable(path, [], dbgOptions);
       } else if (packageJSONExecutable) {
         return new vscode.DebugAdapterExecutable(
-          packageJSONExecutable.command,
-          packageJSONExecutable.args,
-          {
-            ...packageJSONExecutable.options,
-            env: {
-              ...packageJSONExecutable.options?.env,
-              ...env,
+            packageJSONExecutable.command,
+            packageJSONExecutable.args,
+            {
+              ...packageJSONExecutable.options,
+              env : {
+                ...packageJSONExecutable.options?.env,
+                ...configEnvironment,
+                ...env,
+              },
             },
-          },
         );
       } else {
         return undefined;

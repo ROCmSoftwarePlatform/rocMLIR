@@ -1,4 +1,4 @@
-//===-- sanitizer_symbolizer_fuchsia.h -----------------------------------===//
+//===-- sanitizer_symbolizer_amdgpu.h -------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -30,8 +30,11 @@ struct COMgrFunctions {
   bool inited_;
   amd_comgr_status_t (*create_data)(amd_comgr_data_kind_t data_type,
                                     amd_comgr_data_t *data_handle);
-  amd_comgr_status_t (*set_data)(amd_comgr_data_t data_handle, int fd,
-                                 uint64_t offset, uint64_t size);
+  amd_comgr_status_t (*set_data)(amd_comgr_data_t data_handle, uint64_t size,
+                                 uint64_t offset);
+  amd_comgr_status_t (*set_data_from_file_slice)(amd_comgr_data_t data_handle,
+                                                 int fd, uint64_t offset,
+                                                 uint64_t size);
   amd_comgr_status_t (*create_symbolizer)(
       amd_comgr_data_t object_handle, void (*callback)(const char *, void *),
       amd_comgr_symbolizer_info_t *symbolizer_object);

@@ -203,16 +203,6 @@ const string& HipBinNvidia::getHipLdFlags() const {
 
 // initialize Hipc flags
 void HipBinNvidia::initializeHipCFlags() {
-  string hipCFlags;
-  const string& cudaPath = getCompilerPath();
-  if (getOSInfo() == windows)
-    hipCFlags += " -isystem \"" + cudaPath + "/include\"";
-  else
-    hipCFlags += " -isystem " + cudaPath + "/include";
-  string hipIncludePath;
-  hipIncludePath = getHipInclude();
-  hipCFlags += " -isystem \"" + hipIncludePath + "\"";
-  hipCFlags_ = hipCFlags;
 }
 
 // returns Hipccx flags
@@ -223,14 +213,6 @@ const string& HipBinNvidia::getHipCXXFlags() const {
 // initializes the HIPCCX flags
 void HipBinNvidia::initializeHipCXXFlags() {
   string hipCXXFlags = " -Wno-deprecated-gpu-targets ";
-  const string& cudaPath = getCompilerPath();
-  if (getOSInfo() == windows)
-    hipCXXFlags += " -isystem \"" + cudaPath + "/include\"";
-  else
-    hipCXXFlags += " -isystem " + cudaPath + "/include";
-  string hipIncludePath;
-  hipIncludePath = getHipInclude();
-  hipCXXFlags += " -isystem \"" + hipIncludePath + "\"";
   hipCXXFlags_ = hipCXXFlags;
 }
 
@@ -398,7 +380,7 @@ void HipBinNvidia::executeHipCCCmd(vector<string> argv) {
       ISACMD += " ";
       if (hipBinUtilPtr_->substringPresent(isaarg,"--rocm-path=") ||
           hipBinUtilPtr_->substringPresent(isaarg,"--hip-path=")) {
-        ISACMD += "-I" + hipBinUtilPtr_->splitStr(isaarg, '=')[1] + "/include";
+        ISACMD += "-I" + hipcc::utils::splitStr(isaarg, '=')[1] + "/include";
       } else {
         ISACMD += isaarg;
       }

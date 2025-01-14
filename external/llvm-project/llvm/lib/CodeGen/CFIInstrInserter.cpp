@@ -260,12 +260,14 @@ void CFIInstrInserter::calculateOutgoingCFAInfo(MBBCFAInfo &MBBInfo) {
       case MCCFIInstruction::OpEscape:
       case MCCFIInstruction::OpWindowSave:
       case MCCFIInstruction::OpNegateRAState:
+      case MCCFIInstruction::OpNegateRAStateWithPC:
       case MCCFIInstruction::OpGnuArgsSize:
       case MCCFIInstruction::OpLLVMRegisterPair:
       case MCCFIInstruction::OpLLVMVectorRegisters:
       case MCCFIInstruction::OpLLVMVectorOffset:
       case MCCFIInstruction::OpLLVMVectorRegisterMask:
       case MCCFIInstruction::OpLabel:
+      case MCCFIInstruction::OpValOffset:
         break;
       }
       if (CSRReg || CSROffset) {

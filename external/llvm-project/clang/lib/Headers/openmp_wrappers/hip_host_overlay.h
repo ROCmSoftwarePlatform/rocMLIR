@@ -18,17 +18,20 @@
 // arg is set to 0 to prevent dual setting of the HSA coarse-grain attribute.
 // Only the OpenMP runtime table tracking coarse-grain memory is updated.
 
-#if defined(_OPENMP) && __has_include(<hip_runtime_api.h>)
-#include <hip_runtime_api.h>
+#if defined(_OPENMP) &&                                                        \
+    __has_include(                                                             \
+        <hip/hip_runtime_api.h>) && (defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_NVIDIA__))
+#include <hip/hip_runtime_api.h>
 #include <omp.h>
 
 // Define Overlays for HIP host functions
-hipError_t _ovlh_hipHostMalloc(void **p, size_t sz, unsigned int flags) {
+__attribute__((weak)) hipError_t _ovlh_hipHostMalloc(void **p, size_t sz,
+                                                     unsigned int flags) {
   hipError_t e = hipHostMalloc(p, sz, flags);
   omp_register_coarse_grain_mem(*p, sz, /*set_attr*/ 0);
   return e;
 }
-hipError_t _ovlh_hipMalloc(void **p, size_t sz) {
+__attribute__((weak)) hipError_t _ovlh_hipMalloc(void **p, size_t sz) {
   hipError_t e = hipMalloc(p, sz);
   omp_register_coarse_grain_mem(*p, sz, /*set_attr*/ 0);
   return e;
@@ -38,12 +41,15 @@ hipError_t _ovlh_hipMalloc(void **p, size_t sz) {
 
 // Calls to hipHostMalloc will register memory with omp(offload) runtime
 // to prevent fails with duplicate hsa registration
-hipError_t hipHostMalloc(void **p, size_t sz, unsigned int flags) {
+__attribute__((weak)) hipError_t hipHostMalloc(void **p, size_t sz,
+                                               unsigned int flags) {
   return _ovlh_hipHostMalloc(p, sz, flags);
 }
 
 // Calls to hipMalloc will register memory with omp runtime
-hipError_t hipMalloc(void **p, size_t sz) { return _ovlh_hipMalloc(p, sz); }
+__attribute__((weak)) hipError_t hipMalloc(void **p, size_t sz) {
+  return _ovlh_hipMalloc(p, sz);
+}
 #pragma omp end declare variant
 
 #endif // HIP or HIP API compilation with OpenMP.

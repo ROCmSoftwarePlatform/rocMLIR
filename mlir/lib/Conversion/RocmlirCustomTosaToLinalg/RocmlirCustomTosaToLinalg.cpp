@@ -57,19 +57,19 @@ LogicalResult UnsignedCastLoweringPattern::matchAndRewrite(
 
   Location loc = op.getLoc();
   auto outType = cast<RankedTensorType>(op.getResults().front().getType());
-  Type inElemType =
-      cast<RankedTensorType>(op.getInputs().front().getType()).getElementType();
+  Type inElemType = cast<RankedTensorType>(op.getInputList().front().getType())
+                        .getElementType();
   Type outElemType = outType.getElementType();
   Value emptyTensor = rewriter.create<tensor::EmptyOp>(
       loc, outType, /*dynamic_sizes=*/ValueRange{});
 
   SmallVector<AffineMap> iterationMaps(
-      op.getInputs().size() + 1,
+      op.getInputList().size() + 1,
       rewriter.getMultiDimIdentityMap(outType.getRank()));
   SmallVector<utils::IteratorType> iteratorKinds(outType.getRank(),
                                                  utils::IteratorType::parallel);
   auto genericOp = rewriter.create<linalg::GenericOp>(
-      loc, outType, adaptor.getInputs(), emptyTensor, iterationMaps,
+      loc, outType, adaptor.getInputList(), emptyTensor, iterationMaps,
       iteratorKinds, [&](OpBuilder &b, Location loc, ValueRange inputs) {
         Value result;
         if (op.getOperatorName() == "unsigned_cast") {

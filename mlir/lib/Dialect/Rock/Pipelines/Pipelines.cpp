@@ -74,8 +74,11 @@ void rock::buildBufferizePipeline(OpPassManager &pm,
   // (see mlir/lib/Conversion/TosaToLinalg/TosaToLinalgPass.cpp)
   TosaToLinalgOptions tosaToLinalgOptions;
   TosaToLinalgNamedOptions tosaToLinalgNamedOptions;
-  tosa::addTosaToLinalgPasses(pm, tosaToLinalgOptions,
-                              tosaToLinalgNamedOptions);
+  tosa::TosaValidationOptions validationOptions;
+  validationOptions.level = tosa::TosaLevelEnum::None;
+  validationOptions.profile = {"bi", "mi", "mt"};
+  tosa::addTosaToLinalgPasses(pm, tosaToLinalgOptions, tosaToLinalgNamedOptions,
+                              validationOptions);
 
   // for tosa control flow
   /* rocmlir-opt --tosa-to-tensor --tosa-to-scf --tosa-to-arith
@@ -227,9 +230,8 @@ void rock::buildBackendPipeline(OpPassManager &pm,
   auto &gpuPm = pm.nest<gpu::GPUModuleOp>();
   gpuPm.addPass(amdgpu::createAmdgpuEmulateAtomicsPass({options.chip}));
   arith::ArithEmulateUnsupportedFloatsOptions floatEmuOpts;
-  SmallVector<std::string, 4> unsupportedFloats = {"f8E4M3FNUZ", "f8E5M2FNUZ",
-                                                   "f8E4M3FN", "f8E5M2"};
-  floatEmuOpts.sourceTypeStrs = unsupportedFloats;
+  floatEmuOpts.sourceTypeStrs.assign(
+      {"f8E4M3FNUZ", "f8E5M2FNUZ", "f8E4M3FN", "f8E5M2"});
   floatEmuOpts.targetTypeStr = "f32";
   gpuPm.addPass(arith::createArithEmulateUnsupportedFloats(floatEmuOpts));
   ArithToAMDGPUConversionPassOptions arithOptions;

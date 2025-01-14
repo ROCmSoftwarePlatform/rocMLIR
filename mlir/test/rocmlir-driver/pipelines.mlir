@@ -107,7 +107,9 @@
 // HIGHLEVEL-NEXT:func.func(canonicalize{  max-iterations=10 max-num-rewrites=-1 region-simplify=normal test-convergence=false top-down=true}),
 // HIGHLEVEL-NEXT:func.func(tosa-layerwise-constant-fold{aggressive-reduce-constant=false}),
 // HIGHLEVEL-NEXT:func.func(tosa-make-broadcastable),
-// HIGHLEVEL-NEXT:tosa-validate{level=none profile=undefined strict-op-spec-alignment=false},
+// HIGHLEVEL-NEXT:tosa-validate{level=none profile={bi,
+// HIGHLEVEL-NEXT:mi,
+// HIGHLEVEL-NEXT:mt} strict-op-spec-alignment=false},
 // HIGHLEVEL-NEXT:func.func(tosa-to-linalg{aggressive-reduce-constant=false disable-tosa-decompositions=false}),
 // HIGHLEVEL-NEXT:func.func(tosa-to-tensor,
 // HIGHLEVEL-NEXT:tosa-to-scf,
@@ -122,5 +124,5 @@
 // HIGHLEVEL-NEXT:convert-tensor-to-linalg,
 // HIGHLEVEL-NEXT:func.func(empty-tensor-to-alloc-tensor,
 // HIGHLEVEL-NEXT:linalg-fold-unit-extent-dims{use-rank-reducing-slices=false}),
-// HIGHLEVEL-NEXT:one-shot-bufferize{allow-return-allocs-from-loops=false allow-unknown-ops=false analysis-fuzzer-seed=0 analysis-heuristic=bottom-up bufferize-function-boundaries=false check-parallel-regions=true copy-before-write=false  dump-alias-sets=false function-boundary-type-conversion=infer-layout-map must-infer-memory-space=false  print-conflicts=false test-analysis-only=false unknown-type-conversion=fully-dynamic-layout-map},
+// HIGHLEVEL-NEXT:one-shot-bufferize{allow-return-allocs-from-loops=false allow-unknown-ops=false analysis-fuzzer-seed=0 analysis-heuristic=bottom-up buffer-alignment=64 bufferize-function-boundaries=false check-parallel-regions=true copy-before-write=false  dump-alias-sets=false function-boundary-type-conversion=infer-layout-map must-infer-memory-space=false  print-conflicts=false test-analysis-only=false unknown-type-conversion=fully-dynamic-layout-map use-encoding-for-memory-space=false},
 // HIGHLEVEL-NEXT:buffer-results-to-out-params{add-result-attr=false hoist-static-allocs=false})

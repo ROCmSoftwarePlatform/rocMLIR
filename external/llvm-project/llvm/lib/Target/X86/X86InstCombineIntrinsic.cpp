@@ -623,10 +623,12 @@ static Value *simplifyX86movmsk(const IntrinsicInst &II,
   if (isa<UndefValue>(Arg))
     return Constant::getNullValue(ResTy);
 
-  auto *ArgTy = dyn_cast<FixedVectorType>(Arg->getType());
-  // We can't easily peek through x86_mmx types.
-  if (!ArgTy)
+  // Preserve previous behavior and give up.
+  // TODO: treat as <8 x i8>.
+  if (II.getIntrinsicID() == Intrinsic::x86_mmx_pmovmskb)
     return nullptr;
+
+  auto *ArgTy = cast<FixedVectorType>(Arg->getType());
 
   // Expand MOVMSK to compare/bitcast/zext:
   // e.g. PMOVMSKB(v16i8 x):
@@ -1873,9 +1875,7 @@ static Value *simplifyX86extrq(IntrinsicInst &II, Value *Op0,
     // If we were an EXTRQ call, we'll save registers if we convert to EXTRQI.
     if (II.getIntrinsicID() == Intrinsic::x86_sse4a_extrq) {
       Value *Args[] = {Op0, CILength, CIIndex};
-      Module *M = II.getModule();
-      Function *F = Intrinsic::getDeclaration(M, Intrinsic::x86_sse4a_extrqi);
-      return Builder.CreateCall(F, Args);
+      return Builder.CreateIntrinsic(Intrinsic::x86_sse4a_extrqi, {}, Args);
     }
   }
 
@@ -1972,9 +1972,7 @@ static Value *simplifyX86insertq(IntrinsicInst &II, Value *Op0, Value *Op1,
     Constant *CIIndex = ConstantInt::get(IntTy8, Index, false);
 
     Value *Args[] = {Op0, Op1, CILength, CIIndex};
-    Module *M = II.getModule();
-    Function *F = Intrinsic::getDeclaration(M, Intrinsic::x86_sse4a_insertqi);
-    return Builder.CreateCall(F, Args);
+    return Builder.CreateIntrinsic(Intrinsic::x86_sse4a_insertqi, {}, Args);
   }
 
   return nullptr;

@@ -709,27 +709,32 @@ int main()
 // CHECK-NEXT:    [[CONV41:%.*]] = trunc i64 [[ADD40]] to i32
 // CHECK-NEXT:    store i32 [[CONV41]], ptr [[I_ASCAST]], align 4
 // CHECK-NEXT:    [[TMP43:%.*]] = load i32, ptr [[I_ASCAST]], align 4
-// CHECK-NEXT:    [[IDXPROM:%.*]] = sext i32 [[TMP43]] to i64
+// CHECK-NEXT:    [[TMP44:%.*]] = load i32, ptr [[N_ADDR_ASCAST]], align 4
+// CHECK-NEXT:    [[CMP42:%.*]] = icmp slt i32 [[TMP43]], [[TMP44]]
+// CHECK-NEXT:    br i1 [[CMP42]], label [[OMP_BODY_NEXT:%.*]], label [[FOR_INC:%.*]]
+// CHECK:       omp.body.next:
+// CHECK-NEXT:    [[TMP45:%.*]] = load i32, ptr [[I_ASCAST]], align 4
+// CHECK-NEXT:    [[IDXPROM:%.*]] = sext i32 [[TMP45]] to i64
 // CHECK-NEXT:    [[ARRAYIDX:%.*]] = getelementptr inbounds double, ptr [[TMP4]], i64 [[IDXPROM]]
-// CHECK-NEXT:    [[TMP44:%.*]] = load double, ptr [[ARRAYIDX]], align 8
-// CHECK-NEXT:    [[TMP45:%.*]] = load double, ptr addrspace(5) [[TMP5]], align 8
-// CHECK-NEXT:    [[TMP46:%.*]] = fadd double [[TMP45]], [[TMP44]]
-// CHECK-NEXT:    store double [[TMP46]], ptr addrspace(5) [[TMP5]], align 8
-// CHECK-NEXT:    br label [[FOR_INC:%.*]]
+// CHECK-NEXT:    [[TMP46:%.*]] = load double, ptr [[ARRAYIDX]], align 8
+// CHECK-NEXT:    [[TMP47:%.*]] = load double, ptr addrspace(5) [[TMP5]], align 8
+// CHECK-NEXT:    [[TMP48:%.*]] = fadd double [[TMP47]], [[TMP46]]
+// CHECK-NEXT:    store double [[TMP48]], ptr addrspace(5) [[TMP5]], align 8
+// CHECK-NEXT:    br label [[FOR_INC]]
 // CHECK:       for.inc:
-// CHECK-NEXT:    [[NVPTX_NUM_THREADS42:%.*]] = call i32 @__kmpc_get_hardware_num_threads_in_block()
-// CHECK-NEXT:    [[TMP47:%.*]] = mul i32 [[NVPTX_NUM_THREADS42]], [[TMP30]]
-// CHECK-NEXT:    [[TMP48:%.*]] = zext i32 [[TMP47]] to i64
-// CHECK-NEXT:    [[TMP49:%.*]] = mul i64 [[TMP48]], 1
-// CHECK-NEXT:    [[TMP50:%.*]] = load i64, ptr [[DOTOMP_IV_ASCAST]], align 8
-// CHECK-NEXT:    [[TMP51:%.*]] = add i64 [[TMP49]], [[TMP50]]
-// CHECK-NEXT:    store i64 [[TMP51]], ptr [[DOTOMP_IV_ASCAST]], align 8
+// CHECK-NEXT:    [[NVPTX_NUM_THREADS43:%.*]] = call i32 @__kmpc_get_hardware_num_threads_in_block()
+// CHECK-NEXT:    [[TMP49:%.*]] = mul i32 [[NVPTX_NUM_THREADS43]], [[TMP30]]
+// CHECK-NEXT:    [[TMP50:%.*]] = zext i32 [[TMP49]] to i64
+// CHECK-NEXT:    [[TMP51:%.*]] = mul i64 [[TMP50]], 1
+// CHECK-NEXT:    [[TMP52:%.*]] = load i64, ptr [[DOTOMP_IV_ASCAST]], align 8
+// CHECK-NEXT:    [[TMP53:%.*]] = add i64 [[TMP51]], [[TMP52]]
+// CHECK-NEXT:    store i64 [[TMP53]], ptr [[DOTOMP_IV_ASCAST]], align 8
 // CHECK-NEXT:    br label [[FOR_COND]], !llvm.loop [[LOOP39:![0-9]+]]
 // CHECK:       for.end:
-// CHECK-NEXT:    [[TMP52:%.*]] = load ptr, ptr [[DOTADDR_ASCAST]], align 8
-// CHECK-NEXT:    [[TMP53:%.*]] = load ptr, ptr [[DOTADDR1_ASCAST]], align 8
-// CHECK-NEXT:    [[TMP54:%.*]] = load double, ptr addrspace(5) [[TMP5]], align 8
-// CHECK-NEXT:    call void @__kmpc_xteamr_d_16x64(double [[TMP54]], ptr [[TMP2]], ptr [[TMP52]], ptr [[TMP53]], ptr @__kmpc_rfun_sum_d, ptr @__kmpc_rfun_sum_lds_d, double 0.000000e+00, i64 [[TMP29]], i32 [[TMP30]])
+// CHECK-NEXT:    [[TMP54:%.*]] = load ptr, ptr [[DOTADDR_ASCAST]], align 8
+// CHECK-NEXT:    [[TMP55:%.*]] = load ptr, ptr [[DOTADDR1_ASCAST]], align 8
+// CHECK-NEXT:    [[TMP56:%.*]] = load double, ptr addrspace(5) [[TMP5]], align 8
+// CHECK-NEXT:    call void @__kmpc_xteamr_d_16x64(double [[TMP56]], ptr [[TMP2]], ptr [[TMP54]], ptr [[TMP55]], ptr @__kmpc_rfun_sum_d, ptr @__kmpc_rfun_sum_lds_d, double 0.000000e+00, i64 [[TMP29]], i32 [[TMP30]])
 // CHECK-NEXT:    ret void
 //
 //

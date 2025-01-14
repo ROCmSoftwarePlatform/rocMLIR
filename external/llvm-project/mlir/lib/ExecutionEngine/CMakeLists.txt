@@ -18,6 +18,7 @@ set(LLVM_OPTIONAL_SOURCES
   CpuSystemDetect.cpp
   SystemDevices.cpp
   JitRunner.cpp
+  SpirvCpuRuntimeWrappers.cpp
   SyclRuntimeWrappers.cpp
   )
 
@@ -104,7 +105,7 @@ add_mlir_library(MLIRExecutionEngine
   MLIRTargetLLVMIRExport
   )
 
-if(LLVM_BUILD_LLVM_DYLIB)
+if(LLVM_BUILD_LLVM_DYLIB AND NOT (WIN32 OR MINGW OR CYGWIN)) # Does not build on windows currently, see #106859
   # Build a shared library for the execution engine. Some downstream projects
   # use this library to build their own CPU runners while preserving dynamic
   # linkage.
@@ -447,5 +448,18 @@ if(LLVM_ENABLE_PIC)
     target_link_libraries(mlir_sycl_runtime PRIVATE LevelZero::LevelZero SyclRuntime::SyclRuntime)
 
     set_property(TARGET mlir_sycl_runtime APPEND PROPERTY BUILD_RPATH "${LevelZero_LIBRARIES_DIR}" "${SyclRuntime_LIBRARIES_DIR}")
+  endif()
+
+  if(MLIR_ENABLE_SPIRV_CPU_RUNNER)
+    add_mlir_library(mlir_spirv_cpu_runtime
+      SHARED
+      SpirvCpuRuntimeWrappers.cpp
+
+      EXCLUDE_FROM_LIBMLIR
+    )
+
+    target_compile_definitions(mlir_spirv_cpu_runtime
+      PRIVATE
+      mlir_spirv_cpu_runtime_EXPORTS)
   endif()
 endif()

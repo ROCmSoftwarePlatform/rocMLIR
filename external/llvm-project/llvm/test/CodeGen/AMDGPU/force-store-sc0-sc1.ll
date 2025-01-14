@@ -6,7 +6,7 @@
 define amdgpu_kernel void @store_global(ptr addrspace(1) %ptr) {
 ; FORCESC0SC1-LABEL: store_global:
 ; FORCESC0SC1:       ; %bb.0: ; %entry
-; FORCESC0SC1-NEXT:    s_load_dwordx2 s[0:1], s[2:3], 0x24
+; FORCESC0SC1-NEXT:    s_load_dwordx2 s[0:1], s[4:5], 0x24
 ; FORCESC0SC1-NEXT:    v_mov_b32_e32 v0, 0
 ; FORCESC0SC1-NEXT:    v_mov_b32_e32 v1, 1.0
 ; FORCESC0SC1-NEXT:    s_waitcnt lgkmcnt(0)
@@ -15,7 +15,7 @@ define amdgpu_kernel void @store_global(ptr addrspace(1) %ptr) {
 ;
 ; NOSC0SC1-LABEL: store_global:
 ; NOSC0SC1:       ; %bb.0: ; %entry
-; NOSC0SC1-NEXT:    s_load_dwordx2 s[0:1], s[2:3], 0x24
+; NOSC0SC1-NEXT:    s_load_dwordx2 s[0:1], s[4:5], 0x24
 ; NOSC0SC1-NEXT:    v_mov_b32_e32 v0, 0
 ; NOSC0SC1-NEXT:    v_mov_b32_e32 v1, 1.0
 ; NOSC0SC1-NEXT:    s_waitcnt lgkmcnt(0)
@@ -29,7 +29,7 @@ entry:
 define amdgpu_kernel void @store_flat(ptr addrspace(0) %ptr) {
 ; FORCESC0SC1-LABEL: store_flat:
 ; FORCESC0SC1:       ; %bb.0: ; %entry
-; FORCESC0SC1-NEXT:    s_load_dwordx2 s[0:1], s[2:3], 0x24
+; FORCESC0SC1-NEXT:    s_load_dwordx2 s[0:1], s[4:5], 0x24
 ; FORCESC0SC1-NEXT:    v_mov_b32_e32 v2, 1.0
 ; FORCESC0SC1-NEXT:    s_waitcnt lgkmcnt(0)
 ; FORCESC0SC1-NEXT:    v_mov_b64_e32 v[0:1], s[0:1]
@@ -38,7 +38,7 @@ define amdgpu_kernel void @store_flat(ptr addrspace(0) %ptr) {
 ;
 ; NOSC0SC1-LABEL: store_flat:
 ; NOSC0SC1:       ; %bb.0: ; %entry
-; NOSC0SC1-NEXT:    s_load_dwordx2 s[0:1], s[2:3], 0x24
+; NOSC0SC1-NEXT:    s_load_dwordx2 s[0:1], s[4:5], 0x24
 ; NOSC0SC1-NEXT:    v_mov_b32_e32 v2, 1.0
 ; NOSC0SC1-NEXT:    s_waitcnt lgkmcnt(0)
 ; NOSC0SC1-NEXT:    v_mov_b64_e32 v[0:1], s[0:1]
@@ -52,7 +52,7 @@ entry:
 define amdgpu_kernel void @store_lds(ptr addrspace(3) %ptr) {
 ; GCN-LABEL: store_lds:
 ; GCN:       ; %bb.0: ; %entry
-; GCN-NEXT:    s_load_dword s0, s[2:3], 0x24
+; GCN-NEXT:    s_load_dword s0, s[4:5], 0x24
 ; GCN-NEXT:    v_mov_b32_e32 v0, 1.0
 ; GCN-NEXT:    s_waitcnt lgkmcnt(0)
 ; GCN-NEXT:    v_mov_b32_e32 v1, s0
@@ -66,7 +66,7 @@ entry:
 define amdgpu_kernel void @store_scratch(ptr addrspace(5) %ptr) {
 ; FORCESC0SC1-LABEL: store_scratch:
 ; FORCESC0SC1:       ; %bb.0: ; %entry
-; FORCESC0SC1-NEXT:    s_load_dword s0, s[2:3], 0x24
+; FORCESC0SC1-NEXT:    s_load_dword s0, s[4:5], 0x24
 ; FORCESC0SC1-NEXT:    v_mov_b32_e32 v0, 1.0
 ; FORCESC0SC1-NEXT:    s_waitcnt lgkmcnt(0)
 ; FORCESC0SC1-NEXT:    scratch_store_dword off, v0, s0 sc0 sc1
@@ -74,7 +74,7 @@ define amdgpu_kernel void @store_scratch(ptr addrspace(5) %ptr) {
 ;
 ; NOSC0SC1-LABEL: store_scratch:
 ; NOSC0SC1:       ; %bb.0: ; %entry
-; NOSC0SC1-NEXT:    s_load_dword s0, s[2:3], 0x24
+; NOSC0SC1-NEXT:    s_load_dword s0, s[4:5], 0x24
 ; NOSC0SC1-NEXT:    v_mov_b32_e32 v0, 1.0
 ; NOSC0SC1-NEXT:    s_waitcnt lgkmcnt(0)
 ; NOSC0SC1-NEXT:    scratch_store_dword off, v0, s0
@@ -85,15 +85,25 @@ entry:
 }
 
 define amdgpu_ps void @store_buffer(<4 x i32> inreg %rsrc, float %data, i32 %index) {
-; FORCESC0SC1-LABEL: store_buffer:
-; FORCESC0SC1:       ; %bb.0: ; %main_body
-; FORCESC0SC1-NEXT:    buffer_store_dword v0, v1, s[0:3], 0 idxen sc0 sc1
-; FORCESC0SC1-NEXT:    s_endpgm
-;
-; NOSC0SC1-LABEL: store_buffer:
-; NOSC0SC1:       ; %bb.0: ; %main_body
-; NOSC0SC1-NEXT:    buffer_store_dword v0, v1, s[0:3], 0 idxen
-; NOSC0SC1-NEXT:    s_endpgm
+; GCN-LABEL: store_buffer:
+; GCN:       ; %bb.0: ; %main_body
+; GCN-NEXT:    s_getpc_b64 s[4:5]
+; GCN-NEXT:    s_add_u32 s4, s4, llvm.amdgcn.buffer.store.f32@gotpcrel32@lo+4
+; GCN-NEXT:    s_addc_u32 s5, s5, llvm.amdgcn.buffer.store.f32@gotpcrel32@hi+12
+; GCN-NEXT:    s_load_dwordx2 s[4:5], s[4:5], 0x0
+; GCN-NEXT:    v_mov_b32_e32 v5, v1
+; GCN-NEXT:    s_mov_b64 s[8:9], 36
+; GCN-NEXT:    v_mov_b32_e32 v1, s0
+; GCN-NEXT:    v_mov_b32_e32 v2, s1
+; GCN-NEXT:    v_mov_b32_e32 v3, s2
+; GCN-NEXT:    v_mov_b32_e32 v4, s3
+; GCN-NEXT:    v_mov_b32_e32 v6, 0
+; GCN-NEXT:    v_mov_b32_e32 v7, 0
+; GCN-NEXT:    v_mov_b32_e32 v8, 0
+; GCN-NEXT:    s_mov_b32 s32, 0
+; GCN-NEXT:    s_waitcnt lgkmcnt(0)
+; GCN-NEXT:    s_swappc_b64 s[30:31], s[4:5]
+; GCN-NEXT:    s_endpgm
 main_body:
   call void @llvm.amdgcn.buffer.store.f32(float %data, <4 x i32> %rsrc, i32 %index, i32 0, i1 0, i1 0)
   ret void
@@ -102,7 +112,7 @@ main_body:
 define amdgpu_kernel void @store_global_atomic(ptr addrspace(1) %ptr) {
 ; FORCESC0SC1-LABEL: store_global_atomic:
 ; FORCESC0SC1:       ; %bb.0: ; %entry
-; FORCESC0SC1-NEXT:    s_load_dwordx2 s[0:1], s[2:3], 0x24
+; FORCESC0SC1-NEXT:    s_load_dwordx2 s[0:1], s[4:5], 0x24
 ; FORCESC0SC1-NEXT:    v_mov_b32_e32 v0, 0
 ; FORCESC0SC1-NEXT:    v_mov_b32_e32 v1, 1.0
 ; FORCESC0SC1-NEXT:    buffer_wbl2 sc1
@@ -112,7 +122,7 @@ define amdgpu_kernel void @store_global_atomic(ptr addrspace(1) %ptr) {
 ;
 ; NOSC0SC1-LABEL: store_global_atomic:
 ; NOSC0SC1:       ; %bb.0: ; %entry
-; NOSC0SC1-NEXT:    s_load_dwordx2 s[0:1], s[2:3], 0x24
+; NOSC0SC1-NEXT:    s_load_dwordx2 s[0:1], s[4:5], 0x24
 ; NOSC0SC1-NEXT:    v_mov_b32_e32 v0, 0
 ; NOSC0SC1-NEXT:    v_mov_b32_e32 v1, 1.0
 ; NOSC0SC1-NEXT:    buffer_wbl2 sc1
@@ -127,7 +137,7 @@ entry:
 define amdgpu_kernel void @store_global_atomic_system(ptr addrspace(1) %ptr) {
 ; GCN-LABEL: store_global_atomic_system:
 ; GCN:       ; %bb.0:
-; GCN-NEXT:    s_load_dwordx2 s[0:1], s[2:3], 0x24
+; GCN-NEXT:    s_load_dwordx2 s[0:1], s[4:5], 0x24
 ; GCN-NEXT:    v_mov_b32_e32 v0, 0
 ; GCN-NEXT:    v_mov_b32_e32 v1, 1.0
 ; GCN-NEXT:    s_waitcnt lgkmcnt(0)
