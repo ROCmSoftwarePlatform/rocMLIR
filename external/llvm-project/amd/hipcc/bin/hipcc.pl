@@ -186,9 +186,6 @@ if ($HIP_PLATFORM eq "amd") {
 
     $HIPCC=get_normalized_path("$CUDA_PATH/bin/nvcc");
     $HIPCXXFLAGS .= " -Wno-deprecated-gpu-targets ";
-    $HIPCXXFLAGS .= " -isystem " . get_normalized_path("$CUDA_PATH/include");
-    $HIPCXXFLAGS .= " -isystem " . get_normalized_path("$HIP_PATH/include");
-    $HIPCFLAGS .= " -isystem " . get_normalized_path("$CUDA_PATH/include");
 
     $HIPLDFLAGS = " -Wno-deprecated-gpu-targets -lcuda -lcudart -L" . get_normalized_path("$CUDA_PATH/lib64");
 } else {
@@ -348,7 +345,7 @@ foreach $arg (@ARGV)
     }
     if($arg =~ '--amdhsa-code-object-version=')
     {
-        print "Warning: The --amdhsa-code-object-version option has been deprecated and will be removed in the future.  Use -mllvm -mcode-object-version instead.\n";
+        print "Warning: The --amdhsa-code-object-version option has been deprecated and will be removed in the future.  Use -mcode-object-version instead.\n";
         $arg =~ s/--amdhsa-code-object-version=//;
         $hsacoVersion = $arg;
         $swallowArg = 1;

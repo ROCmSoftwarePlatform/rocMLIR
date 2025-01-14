@@ -13,10 +13,11 @@
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/ExprCXX.h"
+#include "clang/Basic/DiagnosticParse.h"
 #include "clang/Basic/PrettyStackTrace.h"
+#include "clang/Basic/TemplateKinds.h"
 #include "clang/Basic/TokenKinds.h"
 #include "clang/Lex/LiteralSupport.h"
-#include "clang/Parse/ParseDiagnostic.h"
 #include "clang/Parse/Parser.h"
 #include "clang/Parse/RAIIObjectsForParser.h"
 #include "clang/Sema/DeclSpec.h"
@@ -1343,9 +1344,13 @@ static void DiagnoseStaticSpecifierRestrictions(Parser &P,
 ExprResult Parser::ParseLambdaExpressionAfterIntroducer(
                      LambdaIntroducer &Intro) {
   SourceLocation LambdaBeginLoc = Intro.Range.getBegin();
-  Diag(LambdaBeginLoc, getLangOpts().CPlusPlus11
-                           ? diag::warn_cxx98_compat_lambda
-                           : diag::ext_lambda);
+  if (getLangOpts().HLSL)
+    Diag(LambdaBeginLoc, diag::ext_hlsl_lambda) << /*HLSL*/ 1;
+  else
+    Diag(LambdaBeginLoc, getLangOpts().CPlusPlus11
+                             ? diag::warn_cxx98_compat_lambda
+                             : diag::ext_lambda)
+        << /*C++*/ 0;
 
   PrettyStackTraceLoc CrashInfo(PP.getSourceManager(), LambdaBeginLoc,
                                 "lambda expression parsing");
@@ -1574,9 +1579,8 @@ ExprResult Parser::ParseLambdaExpressionAfterIntroducer(
                       DynamicExceptionRanges.data(), DynamicExceptions.size(),
                       NoexceptExpr.isUsable() ? NoexceptExpr.get() : nullptr,
                       /*ExceptionSpecTokens*/ nullptr,
-                      /*DeclsInPrototype=*/std::nullopt, LParenLoc,
-                      FunLocalRangeEnd, D, TrailingReturnType,
-                      TrailingReturnTypeLoc, &DS),
+                      /*DeclsInPrototype=*/{}, LParenLoc, FunLocalRangeEnd, D,
+                      TrailingReturnType, TrailingReturnTypeLoc, &DS),
                   std::move(Attributes), DeclEndLoc);
 
     // We have called ActOnLambdaClosureQualifiers for parentheses-less cases
@@ -3033,12 +3037,23 @@ bool Parser::ParseUnqualifiedId(CXXScopeSpec &SS, ParsedType ObjectType,
           SS, ObjectType, ObjectHadErrors,
           TemplateKWLoc ? *TemplateKWLoc : SourceLocation(), Id, IdLoc,
           EnteringContext, Result, TemplateSpecified);
-    else if (TemplateSpecified &&
-             Actions.ActOnTemplateName(
-                 getCurScope(), SS, *TemplateKWLoc, Result, ObjectType,
-                 EnteringContext, Template,
-                 /*AllowInjectedClassName*/ true) == TNK_Non_template)
-      return true;
+
+    if (TemplateSpecified) {
+      TemplateNameKind TNK =
+          Actions.ActOnTemplateName(getCurScope(), SS, *TemplateKWLoc, Result,
+                                    ObjectType, EnteringContext, Template,
+                                    /*AllowInjectedClassName=*/true);
+      if (TNK == TNK_Non_template)
+        return true;
+
+      // C++2c [tem.names]p6
+      // A name prefixed by the keyword template shall be followed by a template
+      // argument list or refer to a class template or an alias template.
+      if ((TNK == TNK_Function_template || TNK == TNK_Dependent_template_name ||
+           TNK == TNK_Var_template) &&
+          !Tok.is(tok::less))
+        Diag(IdLoc, diag::missing_template_arg_list_after_template_kw);
+    }
     return false;
   }
 

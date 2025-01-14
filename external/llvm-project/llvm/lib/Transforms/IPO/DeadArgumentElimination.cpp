@@ -857,9 +857,10 @@ bool DeadArgumentEliminationPass::removeDeadStuffFromFunction(Function *F) {
   // here. Currently, this should not be possible, but special handling might be
   // required when new return value attributes are added.
   if (NRetTy->isVoidTy())
-    RAttrs.remove(AttributeFuncs::typeIncompatible(NRetTy));
+    RAttrs.remove(AttributeFuncs::typeIncompatible(NRetTy, PAL.getRetAttrs()));
   else
-    assert(!RAttrs.overlaps(AttributeFuncs::typeIncompatible(NRetTy)) &&
+    assert(!RAttrs.overlaps(
+               AttributeFuncs::typeIncompatible(NRetTy, PAL.getRetAttrs())) &&
            "Return attributes no longer compatible?");
 
   AttributeSet RetAttrs = AttributeSet::get(F->getContext(), RAttrs);
@@ -903,7 +904,8 @@ bool DeadArgumentEliminationPass::removeDeadStuffFromFunction(Function *F) {
     // Adjust the call return attributes in case the function was changed to
     // return void.
     AttrBuilder RAttrs(F->getContext(), CallPAL.getRetAttrs());
-    RAttrs.remove(AttributeFuncs::typeIncompatible(NRetTy));
+    RAttrs.remove(
+        AttributeFuncs::typeIncompatible(NRetTy, CallPAL.getRetAttrs()));
     AttributeSet RetAttrs = AttributeSet::get(F->getContext(), RAttrs);
 
     // Declare these outside of the loops, so we can reuse them for the second
@@ -975,8 +977,7 @@ bool DeadArgumentEliminationPass::removeDeadStuffFromFunction(Function *F) {
       } else if (NewCB->getType()->isVoidTy()) {
         // If the return value is dead, replace any uses of it with poison
         // (any non-debug value uses will get removed later on).
-        if (!CB.getType()->isX86_MMXTy())
-          CB.replaceAllUsesWith(PoisonValue::get(CB.getType()));
+        CB.replaceAllUsesWith(PoisonValue::get(CB.getType()));
       } else {
         assert((RetTy->isStructTy() || RetTy->isArrayTy()) &&
                "Return type changed, but not into a void. The old return type"
@@ -1040,8 +1041,7 @@ bool DeadArgumentEliminationPass::removeDeadStuffFromFunction(Function *F) {
     } else {
       // If this argument is dead, replace any uses of it with poison
       // (any non-debug value uses will get removed later on).
-      if (!I->getType()->isX86_MMXTy())
-        I->replaceAllUsesWith(PoisonValue::get(I->getType()));
+      I->replaceAllUsesWith(PoisonValue::get(I->getType()));
     }
 
   // If we change the return value of the function we must rewrite any return

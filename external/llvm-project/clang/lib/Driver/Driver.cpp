@@ -45,6 +45,7 @@
 #include "ToolChains/SPIRV.h"
 #include "ToolChains/Solaris.h"
 #include "ToolChains/TCE.h"
+#include "ToolChains/UEFI.h"
 #include "ToolChains/VEToolchain.h"
 #include "ToolChains/WebAssembly.h"
 #include "ToolChains/XCore.h"
@@ -55,16 +56,15 @@
 #include "clang/Config/config.h"
 #include "clang/Driver/Action.h"
 #include "clang/Driver/Compilation.h"
-#include "clang/Driver/DriverDiagnostic.h"
 #include "clang/Driver/InputInfo.h"
 #include "clang/Driver/Job.h"
-#include "clang/Driver/Options.h"
 #include "clang/Driver/OptionUtils.h"
+#include "clang/Driver/Options.h"
 #include "clang/Driver/Phases.h"
 #include "clang/Driver/SanitizerArgs.h"
 #include "clang/Driver/Tool.h"
-#include "clang/Driver/Types.h"
 #include "clang/Driver/ToolChain.h"
+#include "clang/Driver/Types.h"
 #include "clang/Driver/Util.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
@@ -150,13 +150,9 @@ static std::optional<llvm::Triple>
 getHIPOffloadTargetTriple(const Driver &D, const ArgList &Args) {
   if (!Args.hasArg(options::OPT_offload_EQ)) {
     auto OffloadArchs = Args.getAllArgValues(options::OPT_offload_arch_EQ);
-    if (llvm::is_contained(OffloadArchs, "amdgcnspirv")) {
-      if (OffloadArchs.size() == 1)
-        return llvm::Triple("spirv64-amd-amdhsa");
-      // Mixing specific & SPIR-V compilation is not supported for now.
-      D.Diag(diag::err_drv_only_one_offload_target_supported);
-      return std::nullopt;
-    }
+    if (llvm::is_contained(OffloadArchs, "amdgcnspirv") &&
+        OffloadArchs.size() == 1)
+      return llvm::Triple("spirv64-amd-amdhsa");
     return llvm::Triple("amdgcn-amd-amdhsa"); // Default HIP triple.
   }
   auto TT = getOffloadTargetTriple(D, Args);
@@ -230,7 +226,14 @@ Driver::Driver(StringRef ClangExecutable, StringRef TargetTriple,
   }
 
 #if defined(CLANG_CONFIG_FILE_SYSTEM_DIR)
-  SystemConfigDir = CLANG_CONFIG_FILE_SYSTEM_DIR;
+  if (llvm::sys::path::is_absolute(CLANG_CONFIG_FILE_SYSTEM_DIR)) {
+    SystemConfigDir = CLANG_CONFIG_FILE_SYSTEM_DIR;
+  } else {
+    SmallString<128> configFileDir(Dir);
+    llvm::sys::path::append(configFileDir, CLANG_CONFIG_FILE_SYSTEM_DIR);
+    llvm::sys::path::remove_dots(configFileDir, true);
+    SystemConfigDir = static_cast<std::string>(configFileDir);
+  }
 #endif
 #if defined(CLANG_CONFIG_FILE_USER_DIR)
   {
@@ -452,6 +455,7 @@ DerivedArgList *Driver::TranslateInputArgs(const InputArgList &Args) const {
     // some build systems. We don't try to be complete here because we don't
     // care to encourage this usage model.
     if (A->getOption().matches(options::OPT_Wp_COMMA) &&
+        A->getNumValues() > 0 &&
         (A->getValue(0) == StringRef("-MD") ||
          A->getValue(0) == StringRef("-MMD"))) {
       // Rewrite to -MD/-MMD along with -MF.
@@ -604,7 +608,8 @@ static llvm::Triple computeTargetTriple(const Driver &D,
     if (A->getOption().matches(options::OPT_m64) ||
         A->getOption().matches(options::OPT_maix64)) {
       AT = Target.get64BitArchVariant().getArch();
-      if (Target.getEnvironment() == llvm::Triple::GNUX32)
+      if (Target.getEnvironment() == llvm::Triple::GNUX32 ||
+          Target.getEnvironment() == llvm::Triple::GNUT64)
         Target.setEnvironment(llvm::Triple::GNU);
       else if (Target.getEnvironment() == llvm::Triple::MuslX32)
         Target.setEnvironment(llvm::Triple::Musl);
@@ -667,13 +672,21 @@ static llvm::Triple computeTargetTriple(const Driver &D,
       } else if (ABIName == "n32") {
         Target = Target.get64BitArchVariant();
         if (Target.getEnvironment() == llvm::Triple::GNU ||
+            Target.getEnvironment() == llvm::Triple::GNUT64 ||
             Target.getEnvironment() == llvm::Triple::GNUABI64)
           Target.setEnvironment(llvm::Triple::GNUABIN32);
+        else if (Target.getEnvironment() == llvm::Triple::Musl ||
+                 Target.getEnvironment() == llvm::Triple::MuslABI64)
+          Target.setEnvironment(llvm::Triple::MuslABIN32);
       } else if (ABIName == "64") {
         Target = Target.get64BitArchVariant();
         if (Target.getEnvironment() == llvm::Triple::GNU ||
+            Target.getEnvironment() == llvm::Triple::GNUT64 ||
             Target.getEnvironment() == llvm::Triple::GNUABIN32)
           Target.setEnvironment(llvm::Triple::GNUABI64);
+        else if (Target.getEnvironment() == llvm::Triple::Musl ||
+                 Target.getEnvironment() == llvm::Triple::MuslABIN32)
+          Target.setEnvironment(llvm::Triple::MuslABI64);
       }
     }
   }
@@ -973,8 +986,9 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
         } else
           TC = &getToolChain(C.getInputArgs(), TT);
         C.addOffloadDeviceToolChain(TC, Action::OFK_OpenMP);
-        if (DerivedArchs.contains(TT.getTriple()))
-          KnownArchs[TC] = DerivedArchs[TT.getTriple()];
+        auto It = DerivedArchs.find(TT.getTriple());
+        if (It != DerivedArchs.end())
+          KnownArchs[TC] = It->second;
       }
     }
   } else if (C.getInputArgs().hasArg(options::OPT_fopenmp_targets_EQ)) {
@@ -987,20 +1001,29 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
   //
 }
 
-static void appendOneArg(InputArgList &Args, const Arg *Opt,
-                         const Arg *BaseArg) {
+static void appendOneArg(InputArgList &Args, const Arg *Opt) {
   // The args for config files or /clang: flags belong to different InputArgList
   // objects than Args. This copies an Arg from one of those other InputArgLists
   // to the ownership of Args.
   unsigned Index = Args.MakeIndex(Opt->getSpelling());
-  Arg *Copy = new llvm::opt::Arg(Opt->getOption(), Args.getArgString(Index),
-                                 Index, BaseArg);
+  Arg *Copy = new Arg(Opt->getOption(), Args.getArgString(Index), Index);
   Copy->getValues() = Opt->getValues();
   if (Opt->isClaimed())
     Copy->claim();
   Copy->setOwnsValues(Opt->getOwnsValues());
   Opt->setOwnsValues(false);
   Args.append(Copy);
+  if (Opt->getAlias()) {
+    const Arg *Alias = Opt->getAlias();
+    unsigned Index = Args.MakeIndex(Alias->getSpelling());
+    auto AliasCopy = std::make_unique<Arg>(Alias->getOption(),
+                                           Args.getArgString(Index), Index);
+    AliasCopy->getValues() = Alias->getValues();
+    AliasCopy->setOwnsValues(false);
+    if (Alias->isClaimed())
+      AliasCopy->claim();
+    Copy->setAlias(std::move(AliasCopy));
+  }
 }
 
 bool Driver::readConfigFile(StringRef FileName,
@@ -1030,7 +1053,7 @@ bool Driver::readConfigFile(StringRef FileName,
   llvm::SmallString<128> CfgFileName(FileName);
   llvm::sys::path::native(CfgFileName);
   bool ContainErrors;
-  std::unique_ptr<InputArgList> NewOptions = std::make_unique<InputArgList>(
+  auto NewOptions = std::make_unique<InputArgList>(
       ParseArgStrings(NewCfgArgs, /*UseDriverMode=*/true, ContainErrors));
   if (ContainErrors)
     return true;
@@ -1044,12 +1067,8 @@ bool Driver::readConfigFile(StringRef FileName,
     CfgOptions = std::move(NewOptions);
   else {
     // If this is a subsequent config file, append options to the previous one.
-    for (auto *Opt : *NewOptions) {
-      const Arg *BaseArg = &Opt->getBaseArg();
-      if (BaseArg == Opt)
-        BaseArg = nullptr;
-      appendOneArg(*CfgOptions, Opt, BaseArg);
-    }
+    for (auto *Opt : *NewOptions)
+      appendOneArg(*CfgOptions, Opt);
   }
   ConfigFiles.push_back(std::string(CfgFileName));
   return false;
@@ -1247,14 +1266,9 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
                                               : std::move(*CLOptions));
 
   if (HasConfigFile)
-    for (auto *Opt : *CLOptions) {
-      if (Opt->getOption().matches(options::OPT_config))
-        continue;
-      const Arg *BaseArg = &Opt->getBaseArg();
-      if (BaseArg == Opt)
-        BaseArg = nullptr;
-      appendOneArg(Args, Opt, BaseArg);
-    }
+    for (auto *Opt : *CLOptions)
+      if (!Opt->getOption().matches(options::OPT_config))
+        appendOneArg(Args, Opt);
 
   // In CL mode, look for any pass-through arguments
   if (IsCLMode() && !ContainsError) {
@@ -1272,9 +1286,8 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
                           ContainsError));
 
       if (!ContainsError)
-        for (auto *Opt : *CLModePassThroughOptions) {
-          appendOneArg(Args, Opt, nullptr);
-        }
+        for (auto *Opt : *CLModePassThroughOptions)
+          appendOneArg(Args, Opt);
     }
   }
 
@@ -2319,7 +2332,7 @@ bool Driver::HandleImmediateArgs(Compilation &C) {
 
   if (C.getArgs().hasArg(options::OPT_print_multi_lib)) {
     for (const Multilib &Multilib : TC.getMultilibs())
-      if (!Multilib.isFatalError())
+      if (!Multilib.isError())
         llvm::outs() << Multilib << "\n";
     return false;
   }
@@ -3471,9 +3484,11 @@ class OffloadingActionBuilder final {
       llvm::StringMap<bool> Features;
       // getHIPOffloadTargetTriple() is known to return valid value as it has
       // been called successfully in the CreateOffloadingDeviceToolChains().
-      auto ArchStr = parseTargetID(
-          *getHIPOffloadTargetTriple(C.getDriver(), C.getInputArgs()), IdStr,
-          &Features);
+      auto T =
+          (IdStr == "amdgcnspirv")
+              ? llvm::Triple("spirv64-amd-amdhsa")
+              : *getHIPOffloadTargetTriple(C.getDriver(), C.getInputArgs());
+      auto ArchStr = parseTargetID(T, IdStr, &Features);
       if (!ArchStr) {
         C.getDriver().Diag(clang::diag::err_drv_bad_target_id) << IdStr;
         C.setContainsError();
@@ -3693,222 +3708,6 @@ class OffloadingActionBuilder final {
     void appendLinkDependences(OffloadAction::DeviceDependences &DA) override {}
   };
 
-  /// OpenMP action builder. The host bitcode is passed to the device frontend
-  /// and all the device linked images are passed to the host link phase.
-  class OpenMPActionBuilder final : public DeviceActionBuilder {
-    /// The OpenMP actions for the current input.
-    ActionList OpenMPDeviceActions;
-
-    bool CompileDeviceOnly = false;
-
-    /// List of GPU architectures to use in this compilation.
-    SmallVector<TargetID, 4> GpuArchList;
-
-    /// The linker inputs obtained for each toolchain.
-    SmallVector<ActionList, 8> DeviceLinkerInputs;
-
-  public:
-    OpenMPActionBuilder(Compilation &C, DerivedArgList &Args,
-                        const Driver::InputList &Inputs)
-        : DeviceActionBuilder(C, Args, Inputs, Action::OFK_OpenMP) {}
-
-    ActionBuilderReturnCode
-    getDeviceDependences(OffloadAction::DeviceDependences &DA,
-                         phases::ID CurPhase, phases::ID FinalPhase,
-                         PhasesTy &Phases) override {
-      if (OpenMPDeviceActions.empty())
-        return ABRT_Inactive;
-
-      // We should always have an action for each input.
-      assert(OpenMPDeviceActions.size() == ToolChains.size() &&
-             "Number of OpenMP actions and toolchains do not match.");
-
-      // The host only depends on device action in the linking phase, when all
-      // the device images have to be embedded in the host image.
-      if (CurPhase == phases::Link) {
-        assert(ToolChains.size() == DeviceLinkerInputs.size() &&
-               "Toolchains and linker inputs sizes do not match.");
-        auto LI = DeviceLinkerInputs.begin();
-        for (auto *A : OpenMPDeviceActions) {
-          LI->push_back(A);
-          ++LI;
-        }
-
-        // We passed the device action as a host dependence, so we don't need to
-        // do anything else with them.
-        OpenMPDeviceActions.clear();
-        return CompileDeviceOnly ? ABRT_Ignore_Host : ABRT_Success;
-      }
-
-      bool LastActionIsCompile = false;
-      // By default, we produce an action for each device arch.
-      for (unsigned I = 0; I < ToolChains.size(); ++I) {
-        Action *&A = OpenMPDeviceActions[I];
-        // AMDGPU does not support linking of object files, so we skip
-        // assemble and backend actions to produce LLVM IR.
-        if (ToolChains[I]->getTriple().isAMDGCN() &&
-            (CurPhase == phases::Assemble || CurPhase == phases::Backend))
-          continue;
-        A = C.getDriver().ConstructPhaseAction(C, Args, CurPhase, A,
-                                               Action::OFK_OpenMP);
-        LastActionIsCompile =
-            (A->getKind() == Action::ActionClass::CompileJobClass);
-      }
-      return (CompileDeviceOnly && LastActionIsCompile) ? ABRT_Ignore_Host
-                                                        : ABRT_Success;
-    }
-
-    ActionBuilderReturnCode addDeviceDependences(Action *HostAction) override {
-
-      // If this is an input action replicate it for each OpenMP toolchain.
-      if (auto *IA = dyn_cast<InputAction>(HostAction)) {
-        OpenMPDeviceActions.clear();
-        for (unsigned I = 0; I < ToolChains.size(); ++I) {
-          OpenMPDeviceActions.push_back(C.MakeAction<InputAction>(
-              IA->getInputArg(), IA->getType(), GpuArchList[I].ID));
-        }
-        return ABRT_Success;
-      }
-
-      // If this is an unbundling action use it as is for each OpenMP toolchain.
-      if (auto *UA = dyn_cast<OffloadUnbundlingJobAction>(HostAction)) {
-        OpenMPDeviceActions.clear();
-        auto *IA = cast<InputAction>(UA->getInputs().back());
-        std::string FileName = IA->getInputArg().getAsString(Args);
-        // Check if the type of the file is the same as the action. Do not
-        // unbundle it if it is not. Do not unbundle .so files, for example,
-        // which are not object files.
-
-        // TODO(JAN): Create new file type for archive (TY_Archive),
-        // but it would likely touch a lot of code (currently 32
-        // places in 9 files), because anywhere TY_Object is checked,
-        // a check for TY_Archive would have to be added.
-
-        if (IA->getType() == types::TY_Object) {
-          if (llvm::sys::path::has_extension(FileName)) {
-            StringRef Extension =
-                llvm::sys::path::extension(FileName).drop_front();
-            if ((types::lookupTypeForExtension(Extension) !=
-                 types::TY_Object) &&
-                Extension != "a") {
-              return ABRT_Inactive;
-            }
-          } else {
-            return ABRT_Inactive;
-          }
-        }
-
-        for (unsigned I = 0; I < ToolChains.size(); ++I) {
-          OpenMPDeviceActions.push_back(UA);
-          UA->registerDependentActionInfo(ToolChains[I],
-                                          /*BoundArch=*/GpuArchList[I].ID,
-                                          Action::OFK_OpenMP);
-        }
-        return ABRT_Success;
-      }
-
-      // When generating code for OpenMP we use the host compile phase result as
-      // a dependence to the device compile phase so that it can learn what
-      // declarations should be emitted. However, this is not the only use for
-      // the host action, so we prevent it from being collapsed.
-      if (isa<CompileJobAction>(HostAction)) {
-        HostAction->setCannotBeCollapsedWithNextDependentAction();
-        assert(ToolChains.size() == OpenMPDeviceActions.size() &&
-               "Toolchains and device action sizes do not match.");
-        OffloadAction::HostDependence HDep(
-            *HostAction, *C.getSingleOffloadToolChain<Action::OFK_Host>(),
-            /*BoundArch=*/nullptr, Action::OFK_OpenMP);
-        auto TC = ToolChains.begin();
-        unsigned arch_count = 0;
-        for (Action *&A : OpenMPDeviceActions) {
-          assert(isa<CompileJobAction>(A));
-          OffloadAction::DeviceDependences DDep;
-          DDep.add(*A, **TC, GpuArchList[arch_count++].ID, Action::OFK_OpenMP);
-          A = C.MakeAction<OffloadAction>(HDep, DDep);
-          ++TC;
-        }
-      }
-      return ABRT_Success;
-    }
-
-    void appendTopLevelActions(ActionList &AL) override {
-      if (OpenMPDeviceActions.empty())
-        return;
-
-      // We should always have an action for each input.
-      assert(OpenMPDeviceActions.size() == ToolChains.size() &&
-             "Number of OpenMP actions and toolchains do not match.");
-
-      unsigned arch_count = 0;
-      // Append all device actions followed by the proper offload action.
-      auto TI = ToolChains.begin();
-      for (auto *A : OpenMPDeviceActions) {
-        OffloadAction::DeviceDependences Dep;
-        Dep.add(*A, **TI, /*BoundArch=*/GpuArchList[arch_count++].ID,
-                Action::OFK_OpenMP);
-        AL.push_back(C.MakeAction<OffloadAction>(Dep, A->getType()));
-        ++TI;
-      }
-      // We no longer need the action stored in this builder.
-      OpenMPDeviceActions.clear();
-    }
-
-    void appendLinkDeviceActions(ActionList &AL) override {
-      assert(ToolChains.size() == DeviceLinkerInputs.size() &&
-             "Toolchains and linker inputs sizes do not match.");
-      // Append a new link action for each device.
-      auto TC = ToolChains.begin();
-      unsigned arch_count = 0;
-      for (auto &LI : DeviceLinkerInputs) {
-        auto *DeviceLinkAction =
-            C.MakeAction<LinkJobAction>(LI, types::TY_Image);
-        OffloadAction::DeviceDependences DeviceLinkDeps;
-        DeviceLinkDeps.add(*DeviceLinkAction, **TC,
-                           GpuArchList[arch_count++].ID, Action::OFK_OpenMP);
-        AL.push_back(C.MakeAction<OffloadAction>(DeviceLinkDeps,
-                                                 DeviceLinkAction->getType()));
-        ++TC;
-      }
-      DeviceLinkerInputs.clear();
-    }
-
-    Action* appendLinkHostActions(ActionList &AL) override {
-      // Create wrapper bitcode from the result of device link actions and compile
-      // it to an object which will be added to the host link command.
-      auto *BC = C.MakeAction<OffloadWrapperJobAction>(AL, types::TY_LLVM_BC);
-      auto *ASM = C.MakeAction<BackendJobAction>(BC, types::TY_PP_Asm);
-      return C.MakeAction<AssembleJobAction>(ASM, types::TY_Object);
-    }
-
-    void appendLinkDependences(OffloadAction::DeviceDependences &DA) override {}
-
-    bool initialize() override {
-      if (Arg *cu_dev_only =
-              C.getInputArgs().getLastArg(options::OPT_offload_device_only)) {
-        cu_dev_only->claim();
-        CompileDeviceOnly = true;
-        // TODO: Check emitting IR for OpenMP when cuda-device-only is set
-      }
-      // Get the OpenMP toolchains. If we don't get any, the action builder will
-      // know there is nothing to do related to OpenMP offloading.
-      auto OpenMPTCRange = C.getOffloadToolChains<Action::OFK_OpenMP>();
-      for (auto TI = OpenMPTCRange.first, TE = OpenMPTCRange.second; TI != TE;
-           ++TI) {
-        GpuArchList.push_back(
-            TI->second->getTriple().getEnvironmentName().data());
-        ToolChains.push_back(TI->second);
-      }
-
-      DeviceLinkerInputs.resize(ToolChains.size());
-      return false;
-    }
-
-    bool canUseBundlerUnbundler() const override {
-      // OpenMP should use bundled files whenever possible.
-      return true;
-    }
-  };
-
   ///
   /// TODO: Add the implementation for other specialized builders here.
   ///
@@ -3932,9 +3731,6 @@ public:
 
     // Create a specialized builder for HIP.
     SpecializedBuilders.push_back(new HIPActionBuilder(C, Args, Inputs));
-
-    // Create a specialized builder for OpenMP.
-    SpecializedBuilders.push_back(new OpenMPActionBuilder(C, Args, Inputs));
 
     //
     // TODO: Build other specialized builders here.
@@ -3967,11 +3763,10 @@ public:
   void recordHostAction(Action *HostAction, const Arg *InputArg) {
     assert(HostAction && "Invalid host action");
     assert(InputArg && "Invalid input argument");
-    auto Loc = HostActionToInputArgMap.find(HostAction);
-    if (Loc == HostActionToInputArgMap.end())
-      HostActionToInputArgMap[HostAction] = InputArg;
-    assert(HostActionToInputArgMap[HostAction] == InputArg &&
+    auto Loc = HostActionToInputArgMap.try_emplace(HostAction, InputArg).first;
+    assert(Loc->second == InputArg &&
            "host action mapped to multiple input arguments");
+    (void)Loc;
   }
 
   /// Generate an action that adds device dependences (if any) to a host action.
@@ -4247,9 +4042,10 @@ void Driver::handleArguments(Compilation &C, DerivedArgList &Args,
     // Emitting LLVM while linking disabled except in HIPAMD Toolchain
     if (Args.hasArg(options::OPT_emit_llvm) && !Args.hasArg(options::OPT_hip_link))
       Diag(clang::diag::err_drv_emit_llvm_link);
-    if (IsCLMode() && LTOMode != LTOK_None &&
+    if (C.getDefaultToolChain().getTriple().isWindowsMSVCEnvironment() &&
+        LTOMode != LTOK_None &&
         !Args.getLastArgValue(options::OPT_fuse_ld_EQ)
-             .equals_insensitive("lld"))
+             .starts_with_insensitive("lld"))
       Diag(clang::diag::err_drv_lto_without_lld);
 
     // If -dumpdir is not specified, give a default prefix derived from the link
@@ -4279,17 +4075,18 @@ void Driver::handleArguments(Compilation &C, DerivedArgList &Args,
     YcArg = YuArg = nullptr;
   }
 
-  unsigned LastPLSize = 0;
+  bool LinkOnly = phases::Link == FinalPhase && Inputs.size() > 0;
   for (auto &I : Inputs) {
     types::ID InputType = I.first;
     const Arg *InputArg = I.second;
 
     auto PL = types::getCompilationPhases(InputType);
-    LastPLSize = PL.size();
+
+    phases::ID InitialPhase = PL[0];
+    LinkOnly = LinkOnly && phases::Link == InitialPhase && PL.size() == 1;
 
     // If the first step comes after the final phase we are doing as part of
     // this compilation, warn the user about it.
-    phases::ID InitialPhase = PL[0];
     if (InitialPhase > FinalPhase) {
       if (InputArg->isClaimed())
         continue;
@@ -4344,10 +4141,8 @@ void Driver::handleArguments(Compilation &C, DerivedArgList &Args,
     }
   }
 
-  // If we are linking, claim any options which are obviously only used for
-  // compilation.
-  // FIXME: Understand why the last Phase List length is used here.
-  if (FinalPhase == phases::Link && LastPLSize == 1) {
+  // Claim any options which are obviously only used for compilation.
+  if (LinkOnly) {
     Args.ClaimAllArgs(options::OPT_CompileOnly_Group);
     Args.ClaimAllArgs(options::OPT_cl_compile_Group);
   }
@@ -4649,7 +4444,8 @@ void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
 
       // Use the -mcpu=? flag as the dummy input to cc1.
       Actions.clear();
-      Action *InputAc = C.MakeAction<InputAction>(*A, types::TY_C);
+      Action *InputAc = C.MakeAction<InputAction>(
+          *A, IsFlangMode() ? types::TY_Fortran : types::TY_C);
       Actions.push_back(
           C.MakeAction<PrecompileJobAction>(InputAc, types::TY_Nothing));
       for (auto &I : Inputs)
@@ -5025,6 +4821,11 @@ Action *Driver::ConstructPhaseAction(
   // encode this in the steps because the intermediate type depends on
   // arguments. Just special case here.
   if (Phase == phases::Assemble && Input->getType() != types::TY_PP_Asm)
+    return Input;
+
+  // Use of --sycl-link will only allow for the link phase to occur. This is
+  // for all input files.
+  if (Args.hasArg(options::OPT_sycl_link) && Phase != phases::Link)
     return Input;
 
   // Build the appropriate action.
@@ -5822,8 +5623,9 @@ InputInfoList Driver::BuildJobsForActionNoCache(
     std::pair<const Action *, std::string> ActionTC = {
         OA->getHostDependence(),
         GetTriplePlusArchString(TC, BoundArch, TargetDeviceOffloadKind)};
-    if (CachedResults.find(ActionTC) != CachedResults.end()) {
-      InputInfoList Inputs = CachedResults[ActionTC];
+    auto It = CachedResults.find(ActionTC);
+    if (It != CachedResults.end()) {
+      InputInfoList Inputs = It->second;
       Inputs.append(OffloadDependencesInputInfo);
       return Inputs;
     }
@@ -5996,7 +5798,7 @@ InputInfoList Driver::BuildJobsForActionNoCache(
     // We only have to generate a prefix for the host if this is not a top-level
     // action.
     std::string OffloadingPrefix = Action::GetOffloadingFileNamePrefix(
-        A->getOffloadingDeviceKind(), TC->getTriple().normalize(),
+        A->getOffloadingDeviceKind(), EffectiveTriple.normalize(),
         /*CreatePrefixForHost=*/isa<OffloadPackagerJobAction>(A) ||
             !(A->getOffloadingHostActiveKinds() == Action::OFK_None ||
               AtTopLevel));
@@ -6004,16 +5806,6 @@ InputInfoList Driver::BuildJobsForActionNoCache(
     if (!TargetIDStr.empty() && BoundArch.empty()) {
       BoundArch = TargetIDStr;
       OffloadingPrefix.append("-").append(TargetIDStr.str());
-    }
-
-    if (isa<OffloadWrapperJobAction>(JA)) {
-        if (Arg *FinalOutput = C.getArgs().getLastArg(options::OPT_o))
-          BaseInput = FinalOutput->getValue();
-        else
-          BaseInput = getDefaultImageName();
-        std::string BaseNm = std::string(BaseInput);
-        std::replace(BaseNm.begin(), BaseNm.end(), '.', '_');
-        BaseInput = C.getArgs().MakeArgString(BaseNm + "-wrapper");
     }
 
     Result = InputInfo(A, GetNamedOutputPath(C, *JA, BaseInput, BoundArch,
@@ -6720,6 +6512,9 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
     case llvm::Triple::Mesa3D:
       TC = std::make_unique<toolchains::AMDGPUToolChain>(*this, Target, Args);
       break;
+    case llvm::Triple::UEFI:
+      TC = std::make_unique<toolchains::UEFI>(*this, Target, Args);
+      break;
     case llvm::Triple::Win32:
       switch (Target.getEnvironment()) {
       default:
@@ -6764,6 +6559,7 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
     case llvm::Triple::ZOS:
       TC = std::make_unique<toolchains::ZOS>(*this, Target, Args);
       break;
+    case llvm::Triple::Vulkan:
     case llvm::Triple::ShaderModel:
       TC = std::make_unique<toolchains::HLSLToolChain>(*this, Target, Args);
       break;
@@ -6888,8 +6684,8 @@ bool Driver::ShouldUseFlangCompiler(const JobAction &JA) const {
     return false;
 
   // And say "no" if this is not a kind of action flang understands.
-  if (!isa<PreprocessJobAction>(JA) && !isa<CompileJobAction>(JA) &&
-      !isa<BackendJobAction>(JA))
+  if (!isa<PreprocessJobAction>(JA) && !isa<PrecompileJobAction>(JA) &&
+      !isa<CompileJobAction>(JA) && !isa<BackendJobAction>(JA))
     return false;
 
   return true;

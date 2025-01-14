@@ -35,6 +35,9 @@ class InputFile;
 class ObjFile;
 class SymbolTable;
 
+const COFFSyncStream &operator<<(const COFFSyncStream &,
+                                 const llvm::object::Archive::Symbol *);
+
 // The base class for real symbol classes.
 class Symbol {
 public:
@@ -100,7 +103,7 @@ protected:
       : symbolKind(k), isExternal(true), isCOMDAT(false),
         writtenToSymtab(false), isUsedInRegularObj(false),
         pendingArchiveLoad(false), isGCRoot(false), isRuntimePseudoReloc(false),
-        deferUndefined(false), canInline(true), isWeak(false),
+        deferUndefined(false), canInline(true), isWeak(false), isAntiDep(false),
         nameSize(n.size()), nameData(n.empty() ? nullptr : n.data()) {
     assert((!n.empty() || k <= LastDefinedCOFFKind) &&
            "If the name is empty, the Symbol must be a DefinedCOFF.");
@@ -144,6 +147,9 @@ public:
   // This information isn't written to the output; rather, it's used for
   // managing weak symbol overrides.
   unsigned isWeak : 1;
+
+  // True if the symbol is an anti-dependency.
+  unsigned isAntiDep : 1;
 
 protected:
   // Symbol name length. Assume symbol lengths fit in a 32-bit integer.
@@ -340,7 +346,19 @@ public:
   // If this symbol is external weak, try to resolve it to a defined
   // symbol by searching the chain of fallback symbols. Returns the symbol if
   // successful, otherwise returns null.
-  Defined *getWeakAlias();
+  Symbol *getWeakAlias();
+  Defined *getDefinedWeakAlias() {
+    return dyn_cast_or_null<Defined>(getWeakAlias());
+  }
+
+  void setWeakAlias(Symbol *sym, bool antiDep = false) {
+    weakAlias = sym;
+    isAntiDep = antiDep;
+  }
+
+  bool isECAlias(MachineTypes machine) const {
+    return weakAlias && isAntiDep && isArm64EC(machine);
+  }
 
   // If this symbol is external weak, replace this object with aliased symbol.
   bool resolveWeakAlias();

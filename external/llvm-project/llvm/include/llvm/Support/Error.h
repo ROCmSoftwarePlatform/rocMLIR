@@ -1135,6 +1135,8 @@ public:
       (void)!!*Err;
   }
 
+  ErrorAsOutParameter(Error &Err) : Err(&Err) { (void)!!Err; }
+
   ~ErrorAsOutParameter() {
     // Clear the checked bit.
     if (Err && !*Err)

@@ -330,7 +330,7 @@ void AMDGPUAsmPrinter::emitGlobalVariable(const GlobalVariable *GV) {
 
     emitVisibility(GVSym, GV->getVisibility(), !GV->isDeclaration());
     emitLinkage(GV, GVSym);
-    auto TS = getTargetStreamer();
+    auto *TS = getTargetStreamer();
     TS->emitAMDGPULDS(GVSym, Size, Alignment);
     return;
   }
@@ -356,6 +356,7 @@ bool AMDGPUAsmPrinter::doInitialization(Module &M) {
       report_fatal_error("Unexpected code object version");
     }
   }
+
   return AsmPrinter::doInitialization(M);
 }
 
@@ -371,6 +372,28 @@ bool AMDGPUAsmPrinter::doFinalization(Module &M) {
     getTargetStreamer()->EmitCodeEnd(STI);
   }
 
+// FIXME needs AMDGPUResource patch
+#if 0 //<<<<<<< HEAD
+  // Assign expressions which can only be resolved when all other functions are
+  // known.
+  RI.finalize(OutContext);
+
+  // Switch section and emit all GPR maximums within the processed module.
+  OutStreamer->pushSection();
+  MCSectionELF *MaxGPRSection =
+      OutContext.getELFSection(".AMDGPU.gpr_maximums", ELF::SHT_PROGBITS, 0);
+  OutStreamer->switchSection(MaxGPRSection);
+  getTargetStreamer()->EmitMCResourceMaximums(RI.getMaxVGPRSymbol(OutContext),
+                                              RI.getMaxAGPRSymbol(OutContext),
+                                              RI.getMaxSGPRSymbol(OutContext));
+  OutStreamer->popSection();
+
+  for (Function &F : M.functions())
+    validateMCResourceInfo(F);
+
+  RI.reset();
+
+#endif //>>>>>>> 7b9c6a7c3c64
   return AsmPrinter::doFinalization(M);
 }
 
@@ -435,7 +458,7 @@ const MCExpr *AMDGPUAsmPrinter::getAmdhsaKernelCodeProperties(
     KernelCodeProperties |=
         amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR;
   }
-  if (UserSGPRInfo.hasQueuePtr() && CodeObjectVersion < AMDGPU::AMDHSA_COV5) {
+  if (UserSGPRInfo.hasQueuePtr()) {
     KernelCodeProperties |=
         amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR;
   }
@@ -900,6 +923,15 @@ void AMDGPUAsmPrinter::getSIProgramInfo(SIProgramInfo &ProgInfo,
 
     ProgInfo.NumVGPR = AMDGPUMCExpr::createTotalNumVGPR(
         ProgInfo.NumAccVGPR, ProgInfo.NumArchVGPR, Ctx);
+  } else if (isKernel(F.getCallingConv()) &&
+             MFI->getNumKernargPreloadedSGPRs()) {
+    // Consider cases where the total number of UserSGPRs with trailing
+    // allocated preload SGPRs, is greater than the number of explicitly
+    // referenced SGPRs.
+    const MCExpr *UserPlusExtraSGPRs = MCBinaryExpr::createAdd(
+        CreateExpr(MFI->getNumUserSGPRs()), ExtraSGPRs, Ctx);
+    ProgInfo.NumSGPR =
+        AMDGPUMCExpr::createMax({ProgInfo.NumSGPR, UserPlusExtraSGPRs}, Ctx);
   }
 
   // Adjust number of registers used to meet default/requested minimum/maximum
@@ -987,12 +1019,16 @@ void AMDGPUAsmPrinter::getSIProgramInfo(SIProgramInfo &ProgInfo,
   ProgInfo.DX10Clamp = Mode.DX10Clamp;
 
   unsigned LDSAlignShift;
-  if (STM.getGeneration() < AMDGPUSubtarget::SEA_ISLANDS) {
-    // LDS is allocated in 64 dword blocks.
-    LDSAlignShift = 8;
-  } else {
+  if (STM.getFeatureBits().test(FeatureAddressableLocalMemorySize163840)) {
+    // LDS is allocated in 320 dword blocks.
+    LDSAlignShift = 11;
+  } else if (STM.getFeatureBits().test(
+                 FeatureAddressableLocalMemorySize65536)) {
     // LDS is allocated in 128 dword blocks.
     LDSAlignShift = 9;
+  } else {
+    // LDS is allocated in 64 dword blocks.
+    LDSAlignShift = 8;
   }
 
   ProgInfo.SGPRSpill = MFI->getNumSpilledSGPRs();
@@ -1060,8 +1096,8 @@ void AMDGPUAsmPrinter::getSIProgramInfo(SIProgramInfo &ProgInfo,
     // return ((Dst & ~Mask) | (Value << Shift))
     auto SetBits = [&Ctx](const MCExpr *Dst, const MCExpr *Value, uint32_t Mask,
                           uint32_t Shift) {
-      auto Shft = MCConstantExpr::create(Shift, Ctx);
-      auto Msk = MCConstantExpr::create(Mask, Ctx);
+      const auto *Shft = MCConstantExpr::create(Shift, Ctx);
+      const auto *Msk = MCConstantExpr::create(Mask, Ctx);
       Dst = MCBinaryExpr::createAnd(Dst, MCUnaryExpr::createNot(Msk, Ctx), Ctx);
       Dst = MCBinaryExpr::createOr(
           Dst, MCBinaryExpr::createShl(Value, Shft, Ctx), Ctx);
@@ -1244,7 +1280,7 @@ void AMDGPUAsmPrinter::EmitPALMetadata(const MachineFunction &MF,
        const SIProgramInfo &CurrentProgramInfo) {
   const SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
   auto CC = MF.getFunction().getCallingConv();
-  auto MD = getTargetStreamer()->getPALMetadata();
+  auto *MD = getTargetStreamer()->getPALMetadata();
   auto &Ctx = MF.getContext();
 
   MD->setEntryPoint(CC, MF.getFunction().getName());
@@ -1398,7 +1434,7 @@ void AMDGPUAsmPrinter::getAmdKernelCode(AMDGPUMCKernelCodeT &Out,
   if (UserSGPRInfo.hasDispatchPtr())
     Out.code_properties |= AMD_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR;
 
-  if (UserSGPRInfo.hasQueuePtr() && CodeObjectVersion < AMDGPU::AMDHSA_COV5)
+  if (UserSGPRInfo.hasQueuePtr())
     Out.code_properties |= AMD_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR;
 
   if (UserSGPRInfo.hasKernargSegmentPtr())
@@ -1412,9 +1448,6 @@ void AMDGPUAsmPrinter::getAmdKernelCode(AMDGPUMCKernelCodeT &Out,
 
   if (UserSGPRInfo.hasPrivateSegmentSize())
     Out.code_properties |= AMD_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_SIZE;
-
-  if (UserSGPRInfo.hasDispatchPtr())
-    Out.code_properties |= AMD_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR;
 
   if (STM.isXNACKEnabled())
     Out.code_properties |= AMD_CODE_PROPERTY_IS_XNACK_SUPPORTED;

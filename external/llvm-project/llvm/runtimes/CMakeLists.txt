@@ -502,19 +502,58 @@ if(build_runtimes)
     list(APPEND extra_cmake_args "-DCMAKE_PROGRAM_PATH=${CMAKE_PROGRAM_PATH}")
   endif()
 
-  if("openmp" IN_LIST LLVM_ENABLE_RUNTIMES)
-    if(DEFINED LIBOMPTARGET_EXTERNAL_PROJECT_HSA_PATH AND DEFINED LIBOMPTARGET_EXTERNAL_PROJECT_THUNK_PATH)
+  if("offload" IN_LIST LLVM_ENABLE_RUNTIMES)
+    # With ROCm 6.3 the ROCr runtime and the thunk layer share a single repository.
+    # No need to provide a separate path for ROCt.
+    if (OFFLOAD_EXTERNAL_PROJECT_UNIFIED_ROCR)
+      if(NOT DEFINED LIBOMPTARGET_EXTERNAL_PROJECT_HSA_PATH)
+        message(SEND_ERROR "External ROCr requires setting LIBOMPTARGET_EXTERNAL_PROJECT_HSA_PATH")
+      endif()
+
+      message(STATUS "Add external unified ROCr: ${LIBOMPTARGET_EXTERNAL_PROJECT_HSA_PATH}")
+      ExternalProject_Add(rocr-runtime
+        SOURCE_DIR ${LIBOMPTARGET_EXTERNAL_PROJECT_HSA_PATH}
+        DEPENDS clang llvm-link lld opt llvm-objcopy
+        INSTALL_COMMAND ""
+        CMAKE_ARGS -DBUILD_SHARED_LIBS=ON
+                   -DCMAKE_PREFIX_PATH=${CMAKE_BINARY_DIR}/lib/cmake
+                   -DIMAGE_SUPPORT=OFF
+                   -DLLVM_RUNTIME_OPENMP=ON)
+      set(HSA_DEP rocr-runtime)
+
+      # omptarget device RTL depends on device libs, leading to circular dependency in build scripts.
+      # Providing path to the sources enables to build them as part of compiler build, which
+      # removes the ciruclar dependency on the script-side.
+      if (DEFINED LIBOMPTARGET_EXTERNAL_PROJECT_ROCM_DEVICE_LIBS_PATH)
+        message(STATUS "Add external AMD device-libs: ${LIBOMPTARGET_EXTERNAL_PROJECT_ROCM_DEVICE_LIBS_PATH}")
+        ExternalProject_Add(rocm-device-libs
+          SOURCE_DIR ${LIBOMPTARGET_EXTERNAL_PROJECT_ROCM_DEVICE_LIBS_PATH}
+          DEPENDS clang llvm-link lld opt llvm-objcopy
+          CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${ROCM_DEVICE_LIBS_INSTALL_PREFIX_PATH}
+                     -DCMAKE_PREFIX_PATH=${CMAKE_BINARY_DIR}/lib/cmake
+                     -DROCM_DEVICE_LIBS_BITCODE_INSTALL_LOC_NEW=${ROCM_DEVICE_LIBS_BITCODE_INSTALL_LOC}
+                     -DROCM_DEVICE_LIBS_BITCODE_INSTALL_LOC_OLD=amdgcn)
+      endif()
+    endif()
+
+    if(DEFINED LIBOMPTARGET_EXTERNAL_PROJECT_HSA_PATH AND
+       DEFINED LIBOMPTARGET_EXTERNAL_PROJECT_THUNK_PATH AND
+       DEFINED LIBOMPTARGET_EXTERNAL_PROJECT_ROCM_DEVICE_LIBS_PATH)
       ExternalProject_Add(roct
         SOURCE_DIR ${LIBOMPTARGET_EXTERNAL_PROJECT_THUNK_PATH}
         DEPENDS clang llvm-link lld opt llvm-objcopy
         INSTALL_COMMAND ""
-	CMAKE_ARGS -DCMAKE_PREFIX_PATH=${CMAKE_BINARY_DIR}/lib/cmake)
+        CMAKE_ARGS -DCMAKE_PREFIX_PATH=${CMAKE_BINARY_DIR}/lib/cmake)
       ExternalProject_Add(rocr-runtime
         SOURCE_DIR ${LIBOMPTARGET_EXTERNAL_PROJECT_HSA_PATH}
         DEPENDS clang llvm-link lld opt llvm-objcopy roct
         INSTALL_COMMAND ""
-	CMAKE_ARGS -DBUILD_SHARED_LIBS=ON -DCMAKE_PREFIX_PATH=${CMAKE_BINARY_DIR}/lib/cmake -DIMAGE_SUPPORT=OFF -DLLVM_RUNTIME_OPENMP=ON -DHSAKMT_SRC_PATH=${LIBOMPTARGET_EXTERNAL_PROJECT_THUNK_PATH})
+        CMAKE_ARGS -DBUILD_SHARED_LIBS=ON -DCMAKE_PREFIX_PATH=${CMAKE_BINARY_DIR}/lib/cmake -DIMAGE_SUPPORT=OFF -DLLVM_RUNTIME_OPENMP=ON -DHSAKMT_SRC_PATH=${LIBOMPTARGET_EXTERNAL_PROJECT_THUNK_PATH})
         set(HSA_DEP rocr-runtime)
+      ExternalProject_Add(rocm-device-libs
+        SOURCE_DIR ${LIBOMPTARGET_EXTERNAL_PROJECT_ROCM_DEVICE_LIBS_PATH}
+        DEPENDS clang llvm-link lld opt llvm-objcopy
+        CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${ROCM_DEVICE_LIBS_INSTALL_PREFIX_PATH} -DCMAKE_PREFIX_PATH=${CMAKE_BINARY_DIR}/lib/cmake -DROCM_DEVICE_LIBS_BITCODE_INSTALL_LOC_NEW=${ROCM_DEVICE_LIBS_BITCODE_INSTALL_LOC} -DROCM_DEVICE_LIBS_BITCODE_INSTALL_LOC_OLD=amdgcn)
     endif()
     if("AMDGPU" IN_LIST LLVM_TARGETS_TO_BUILD)
       set(AMDGPU_ARCH_DEP amdgpu-arch)
@@ -530,29 +569,14 @@ if(build_runtimes)
       # that all .mod files are also properly build.
       list(APPEND extra_deps "flang-new" "module_files")
     endif()
-    foreach(dep opt llvm-link llvm-extract clang clang-offload-packager rocm-device-libs offload-arch amdgcn_hostexec_services ${HSA_DEP} ${AMDGPU_ARCH_DEP})
+    if (${LIBOMPTARGET_BUILD_DEVICE_FORTRT})
+      set(FORTRT_DEP FortranRuntime)
+    endif()
+    foreach(dep opt llvm-link llvm-extract clang clang-offload-packager rocm-device-libs offload-arch amdgcn_hostexec_services ${HSA_DEP} ${AMDGPU_ARCH_DEP} ${FORTRT_DEP})
       if(TARGET ${dep} AND OPENMP_ENABLE_LIBOMPTARGET)
         list(APPEND extra_deps ${dep})
       endif()
     endforeach()
-  endif()
-  if("libc" IN_LIST LLVM_ENABLE_PROJECTS AND
-      (LLVM_LIBC_FULL_BUILD OR LLVM_LIBC_GPU_BUILD))
-    if(LIBC_HDRGEN_EXE)
-      set(hdrgen_exe ${LIBC_HDRGEN_EXE})
-    else()
-      if(TARGET ${LIBC_TABLEGEN_EXE})
-        set(hdrgen_exe $<TARGET_FILE:${LIBC_TABLEGEN_EXE}>)
-      else()
-        set(hdrgen_exe ${LIBC_TABLEGEN_EXE})
-      endif()
-      set(hdrgen_deps ${LIBC_TABLEGEN_TARGET})
-    endif()
-    if(NOT hdrgen_exe)
-      message(FATAL_ERROR "libc-hdrgen executable missing")
-    endif()
-    list(APPEND extra_cmake_args "-DLIBC_HDRGEN_EXE=${hdrgen_exe}")
-    list(APPEND extra_deps ${hdrgen_deps})
   endif()
   if(LLVM_LIBC_GPU_BUILD)
     list(APPEND extra_cmake_args "-DLLVM_LIBC_GPU_BUILD=ON")
@@ -574,6 +598,9 @@ if(build_runtimes)
     endif()
     if(TARGET clang-offload-packager)
       list(APPEND extra_deps clang-offload-packager)
+    endif()
+    if(TARGET clang-nvlink-wrapper)
+      list(APPEND extra_deps clang-nvlink-wrapper)
     endif()
   endif()
   if(LLVM_LIBC_FULL_BUILD)
@@ -648,6 +675,7 @@ if(build_runtimes)
           CMAKE_ARGS -DLLVM_DEFAULT_TARGET_TRIPLE=${name}
                      -DLLVM_RUNTIMES_PREFIX=${name}/
                      -DLLVM_RUNTIMES_LIBDIR_SUBDIR=${multilib}
+                     ${extra_cmake_args}
           BASE_NAME ${name}
           EXTRA_ARGS TARGET_TRIPLE ${name})
       endforeach()

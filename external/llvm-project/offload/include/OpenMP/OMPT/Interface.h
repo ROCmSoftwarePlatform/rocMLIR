@@ -10,8 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef OPENMP_LIBOMPTARGET_SRC_OMPTINTERFACE_H
-#define OPENMP_LIBOMPTARGET_SRC_OMPTINTERFACE_H
+#ifndef OFFLOAD_INCLUDE_OPENMP_OMPT_INTERFACE_H
+#define OFFLOAD_INCLUDE_OPENMP_OMPT_INTERFACE_H
 
 // Only provide functionality if target OMPT support is enabled
 #ifdef OMPT_SUPPORT
@@ -44,9 +44,9 @@ namespace ompt {
 
 /// Function pointers that will be used to track task_data and
 /// target_task_data.
-extern ompt_get_task_data_t ompt_get_task_data_fn;
-extern ompt_get_target_task_data_t ompt_get_target_task_data_fn;
-extern ompt_set_frame_enter_t ompt_set_frame_enter_fn;
+static ompt_get_task_data_t ompt_get_task_data_fn;
+static ompt_get_target_task_data_t ompt_get_target_task_data_fn;
+static ompt_set_frame_enter_t ompt_set_frame_enter_fn;
 
 /// OMPT global tracing status. Indicates if at least one device is traced.
 extern bool TracingActive;
@@ -468,16 +468,6 @@ struct OmptEventInfoTy {
   uint64_t NumTeams;
   /// Pointer to the actual buffer storage location
   ompt_record_ompt_t *TraceRecord;
-  /// Pointer to OMPT Interface instance (required to cross shared library
-  /// boundary)
-  llvm::omp::target::ompt::Interface *RegionInterface;
-  /// Pointer to OMPT Interface member function
-  /// The type of the function depends on the operation that is performed
-  std::variant<std::monostate,
-               decltype(std::mem_fn(&Interface::stopTargetSubmitTraceAsync)),
-               decltype(std::mem_fn(
-                   &Interface::stopTargetDataMovementTraceAsync))>
-      RIFunction;
 };
 
 /// Similar to the original InterfaceRAII this class is used for tracing and
@@ -502,8 +492,6 @@ public:
         AI->OmptEventInfo = new OmptEventInfoTy();
       AI->OmptEventInfo->TraceRecord = Record;
       AI->OmptEventInfo->NumTeams = 0;
-      AI->OmptEventInfo->RegionInterface = &RegionInterface;
-      AI->OmptEventInfo->RIFunction = std::get<1>(Callbacks);
     } else {
       // Actively prevent further tracing of this event
       AI->OmptEventInfo = nullptr;
@@ -567,4 +555,4 @@ private:
 
 #endif // OMPT_SUPPORT
 
-#endif // OPENMP_LIBOMPTARGET_SRC_OMPTINTERFACE_H
+#endif // OFFLOAD_INCLUDE_OPENMP_OMPT_INTERFACE_H

@@ -480,12 +480,12 @@ LogicalResult LLVMStructType::setBody(ArrayRef<Type> types, bool isPacked) {
 
 bool LLVMStructType::isPacked() const { return getImpl()->isPacked(); }
 bool LLVMStructType::isIdentified() const { return getImpl()->isIdentified(); }
-bool LLVMStructType::isOpaque() {
+bool LLVMStructType::isOpaque() const {
   return getImpl()->isIdentified() &&
          (getImpl()->isOpaque() || !getImpl()->isInitialized());
 }
 bool LLVMStructType::isInitialized() { return getImpl()->isInitialized(); }
-StringRef LLVMStructType::getName() { return getImpl()->getIdentifier(); }
+StringRef LLVMStructType::getName() const { return getImpl()->getIdentifier(); }
 ArrayRef<Type> LLVMStructType::getBody() const {
   return isIdentified() ? getImpl()->getIdentifiedStructBody()
                         : getImpl()->getTypeList();
@@ -781,7 +781,7 @@ bool mlir::LLVM::isCompatibleOuterType(Type type) {
       LLVMScalableVectorType,
       LLVMTargetExtType,
       LLVMVoidType,
-      LLVMX86MMXType
+      LLVMX86AMXType
     >(type)) {
     // clang-format on
     return true;
@@ -844,7 +844,7 @@ static bool isCompatibleImpl(Type type, DenseSet<Type> &compatibleTypes) {
             LLVMPPCFP128Type,
             LLVMTokenType,
             LLVMVoidType,
-            LLVMX86MMXType
+            LLVMX86AMXType
           >([](Type) { return true; })
           // clang-format on
           .Default([](Type) { return false; });
@@ -986,8 +986,7 @@ llvm::TypeSize mlir::LLVM::getPrimitiveTypeSizeInBits(Type type) {
       .Case<BFloat16Type, Float16Type>(
           [](Type) { return llvm::TypeSize::getFixed(16); })
       .Case<Float32Type>([](Type) { return llvm::TypeSize::getFixed(32); })
-      .Case<Float64Type, LLVMX86MMXType>(
-          [](Type) { return llvm::TypeSize::getFixed(64); })
+      .Case<Float64Type>([](Type) { return llvm::TypeSize::getFixed(64); })
       .Case<Float80Type>([](Type) { return llvm::TypeSize::getFixed(80); })
       .Case<Float128Type>([](Type) { return llvm::TypeSize::getFixed(128); })
       .Case<IntegerType>([](IntegerType intTy) {

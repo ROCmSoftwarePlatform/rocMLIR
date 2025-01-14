@@ -104,33 +104,6 @@ TEST_F(MLIRTargetLLVMROCDL, SKIP_WITHOUT_AMDGPU(SerializeROCDLToLLVM)) {
     ASSERT_TRUE((*llvmModule)->getFunction("rocdl_kernel") != nullptr);
   }
 }
-
-// Test ROCDL serialization to PTX.
-TEST_F(MLIRTargetLLVMROCDL, SKIP_WITHOUT_AMDGPU(SerializeROCDLToPTX)) {
-  MLIRContext context(registry);
-
-  OwningOpRef<ModuleOp> module =
-      parseSourceString<ModuleOp>(moduleStr, &context);
-  ASSERT_TRUE(!!module);
-
-  // Create a ROCDL target.
-  ROCDL::ROCDLTargetAttr target = ROCDL::ROCDLTargetAttr::get(&context);
-
-  // Serialize the module.
-  auto serializer = dyn_cast<gpu::TargetAttrInterface>(target);
-  ASSERT_TRUE(!!serializer);
-  gpu::TargetOptions options("", {}, "", gpu::CompilationTarget::Assembly);
-  for (auto gpuModule : (*module).getBody()->getOps<gpu::GPUModuleOp>()) {
-    std::optional<SmallVector<char, 0>> object =
-        serializer.serializeToObject(gpuModule, options);
-    // Check that the serializer was successful.
-    ASSERT_TRUE(object != std::nullopt);
-    ASSERT_TRUE(!object->empty());
-    ASSERT_TRUE(
-        StringRef(object->data(), object->size()).contains("rocdl_kernel"));
-  }
-}
-
 // Test ROCDL serialization to ISA with default code object version.
 TEST_F(MLIRTargetLLVMROCDL,
        SKIP_WITHOUT_AMDGPU(SerializeROCDLToISAWithDefaultCOV)) {
@@ -151,9 +124,7 @@ TEST_F(MLIRTargetLLVMROCDL,
     std::optional<SmallVector<char, 0>> object =
         serializer.serializeToObject(gpuModule, options);
     // Check that the serializer was successful.
-    ASSERT_TRUE(object != std::nullopt);
-    ASSERT_TRUE(!object->empty());
-    ASSERT_TRUE(StringRef(object->data(), object->size())
+    EXPECT_TRUE(StringRef(object->data(), object->size())
                     .contains(".amdhsa_code_object_version 5"));
   }
 }
@@ -179,10 +150,34 @@ TEST_F(MLIRTargetLLVMROCDL,
     std::optional<SmallVector<char, 0>> object =
         serializer.serializeToObject(gpuModule, options);
     // Check that the serializer was successful.
+    EXPECT_TRUE(StringRef(object->data(), object->size())
+                    .contains(".amdhsa_code_object_version 4"));
+  }
+}
+
+// Test ROCDL serialization to PTX.
+TEST_F(MLIRTargetLLVMROCDL, SKIP_WITHOUT_AMDGPU(SerializeROCDLToPTX)) {
+  MLIRContext context(registry);
+
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(moduleStr, &context);
+  ASSERT_TRUE(!!module);
+
+  // Create a ROCDL target.
+  ROCDL::ROCDLTargetAttr target = ROCDL::ROCDLTargetAttr::get(&context);
+
+  // Serialize the module.
+  auto serializer = dyn_cast<gpu::TargetAttrInterface>(target);
+  ASSERT_TRUE(!!serializer);
+  gpu::TargetOptions options("", {}, "", gpu::CompilationTarget::Assembly);
+  for (auto gpuModule : (*module).getBody()->getOps<gpu::GPUModuleOp>()) {
+    std::optional<SmallVector<char, 0>> object =
+        serializer.serializeToObject(gpuModule, options);
+    // Check that the serializer was successful.
     ASSERT_TRUE(object != std::nullopt);
     ASSERT_TRUE(!object->empty());
-    ASSERT_TRUE(StringRef(object->data(), object->size())
-                    .contains(".amdhsa_code_object_version 4"));
+    ASSERT_TRUE(
+        StringRef(object->data(), object->size()).contains("rocdl_kernel"));
   }
 }
 

@@ -21,6 +21,7 @@ typedef std::string::size_type TSIZE;
 #endif
 
 #include <iostream>
+#include <sstream>
 
 std::string hipcc::utils::getSelfPath() {
   constexpr size_t MAX_PATH_CHAR = 1024;
@@ -46,4 +47,15 @@ std::string hipcc::utils::getSelfPath() {
   }
 #endif
   return path;
+}
+
+std::vector<std::string> hipcc::utils::splitStr(std::string const &fullStr,
+                                                char delimiter) {
+  std::vector<std::string> tokens;
+  std::stringstream check1(fullStr);
+  std::string intermediate;
+  while (std::getline(check1, intermediate, delimiter)) {
+    tokens.emplace_back(std::move(intermediate));
+  }
+  return tokens;
 }

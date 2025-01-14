@@ -26,11 +26,10 @@
 #   define _LIBCXXABI_USE_CRASHREPORTER_CLIENT
 #endif
 
-void abort_message(const char* format, ...)
-{
-    // Write message to stderr. We do this before formatting into a
-    // variable-size buffer so that we still get some information if
-    // formatting into the variable-sized buffer fails.
+        void __abort_message(const char* format, ...) {
+          // Write message to stderr. We do this before formatting into a
+          // variable-size buffer so that we still get some information if
+          // formatting into the variable-sized buffer fails.
 #if !defined(NDEBUG) || !defined(LIBCXXABI_BAREMETAL)
     {
         fprintf(stderr, "libc++abi: ");
@@ -76,4 +75,4 @@ void abort_message(const char* format, ...)
 #endif // __BIONIC__
 
     abort();
-}
+        }

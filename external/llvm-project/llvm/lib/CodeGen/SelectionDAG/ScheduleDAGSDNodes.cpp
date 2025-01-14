@@ -736,8 +736,8 @@ void ScheduleDAGSDNodes::VerifyScheduledSequence(bool isBottomUp) {
 /// ProcessSDDbgValues - Process SDDbgValues associated with this node.
 static void
 ProcessSDDbgValues(SDNode *N, SelectionDAG *DAG, InstrEmitter &Emitter,
-                   SmallVectorImpl<std::pair<unsigned, MachineInstr*> > &Orders,
-                   DenseMap<SDValue, Register> &VRBaseMap, unsigned Order) {
+                   SmallVectorImpl<std::pair<unsigned, MachineInstr *>> &Orders,
+                   InstrEmitter::VRBaseMapType &VRBaseMap, unsigned Order) {
   if (!N->getHasDebugValue())
     return;
 
@@ -782,7 +782,7 @@ ProcessSDDbgValues(SDNode *N, SelectionDAG *DAG, InstrEmitter &Emitter,
 // instructions in the right order.
 static void
 ProcessSourceNode(SDNode *N, SelectionDAG *DAG, InstrEmitter &Emitter,
-                  DenseMap<SDValue, Register> &VRBaseMap,
+                  InstrEmitter::VRBaseMapType &VRBaseMap,
                   SmallVectorImpl<std::pair<unsigned, MachineInstr *>> &Orders,
                   SmallSet<Register, 8> &Seen, MachineInstr *NewInsn) {
   unsigned Order = N->getIROrder();
@@ -807,9 +807,9 @@ ProcessSourceNode(SDNode *N, SelectionDAG *DAG, InstrEmitter &Emitter,
   ProcessSDDbgValues(N, DAG, Emitter, Orders, VRBaseMap, Order);
 }
 
-void ScheduleDAGSDNodes::
-EmitPhysRegCopy(SUnit *SU, DenseMap<SUnit*, Register> &VRBaseMap,
-                MachineBasicBlock::iterator InsertPos) {
+void ScheduleDAGSDNodes::EmitPhysRegCopy(
+    SUnit *SU, SmallDenseMap<SUnit *, Register, 16> &VRBaseMap,
+    MachineBasicBlock::iterator InsertPos) {
   for (const SDep &Pred : SU->Preds) {
     if (Pred.isCtrl())
       continue; // ignore chain preds
@@ -851,8 +851,8 @@ EmitPhysRegCopy(SUnit *SU, DenseMap<SUnit*, Register> &VRBaseMap,
 MachineBasicBlock *ScheduleDAGSDNodes::
 EmitSchedule(MachineBasicBlock::iterator &InsertPos) {
   InstrEmitter Emitter(DAG->getTarget(), BB, InsertPos);
-  DenseMap<SDValue, Register> VRBaseMap;
-  DenseMap<SUnit*, Register> CopyVRBaseMap;
+  InstrEmitter::VRBaseMapType VRBaseMap;
+  SmallDenseMap<SUnit *, Register, 16> CopyVRBaseMap;
   SmallVector<std::pair<unsigned, MachineInstr*>, 32> Orders;
   SmallSet<Register, 8> Seen;
   bool HasDbg = DAG->hasDebugValues();
@@ -861,7 +861,7 @@ EmitSchedule(MachineBasicBlock::iterator &InsertPos) {
   // Zero, one, or multiple instructions can be created when emitting a node.
   auto EmitNode =
       [&](SDNode *Node, bool IsClone, bool IsCloned,
-          DenseMap<SDValue, Register> &VRBaseMap) -> MachineInstr * {
+          InstrEmitter::VRBaseMapType &VRBaseMap) -> MachineInstr * {
     // Fetch instruction prior to this, or end() if nonexistant.
     auto GetPrevInsn = [&](MachineBasicBlock::iterator I) {
       if (I == BB->begin())

@@ -350,6 +350,20 @@ void ErrorBadParamsToAnnotateDoubleEndedContiguousContainer::Print() {
   ReportErrorSummary(scariness.GetDescription(), stack);
 }
 
+void ErrorBadParamsToCopyContiguousContainerAnnotations::Print() {
+  Report(
+      "ERROR: AddressSanitizer: bad parameters to "
+      "__sanitizer_copy_contiguous_container_annotations:\n"
+      "      src_storage_beg : %p\n"
+      "      src_storage_end : %p\n"
+      "      dst_storage_beg : %p\n"
+      "      new_storage_end : %p\n",
+      (void *)old_storage_beg, (void *)old_storage_end, (void *)new_storage_beg,
+      (void *)new_storage_end);
+  stack->Print();
+  ReportErrorSummary(scariness.GetDescription(), stack);
+}
+
 void ErrorODRViolation::Print() {
   Decorator d;
   Printf("%s", d.Error());
@@ -679,14 +693,12 @@ void ErrorNonSelfAMDGPU::PrintStack() {
   InternalScopedString source_location;
   source_location.AppendF("  #0 %p", callstack[0]);
 #if SANITIZER_AMDGPU
-  if (cb_loc.fd != -1) {
-    source_location.Append(" in ");
-    __sanitizer::AMDGPUCodeObjectSymbolizer symbolizer;
-    symbolizer.Init(cb_loc.fd, cb_loc.offset, cb_loc.size);
-    symbolizer.SymbolizePC(callstack[0] - cb_loc.vma_adjust, source_location);
-    // release all allocated comgr objects.
-    symbolizer.Release();
-  }
+  source_location.Append(" in ");
+  __sanitizer::AMDGPUCodeObjectSymbolizer symbolizer;
+  symbolizer.Init(cb_loc.fd, cb_loc.offset, cb_loc.size);
+  symbolizer.SymbolizePC(callstack[0] - cb_loc.vma_adjust, source_location);
+  // release all allocated comgr objects.
+  symbolizer.Release();
 #endif
   Printf("%s", source_location.data());
 }

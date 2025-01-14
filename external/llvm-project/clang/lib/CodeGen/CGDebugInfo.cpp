@@ -30,7 +30,6 @@
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/AST/VTableBuilder.h"
 #include "clang/Basic/CodeGenOptions.h"
-#include "clang/Basic/FileManager.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Basic/Version.h"
 #include "clang/CodeGen/ModuleBuilder.h"
@@ -48,7 +47,6 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
-#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MD5.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SHA1.h"
@@ -337,7 +335,8 @@ PrintingPolicy CGDebugInfo::getPrintingPolicy() const {
     PP.SplitTemplateClosers = true;
   }
 
-  PP.SuppressInlineNamespace = false;
+  PP.SuppressInlineNamespace =
+      PrintingPolicy::SuppressInlineNamespaceMode::None;
   PP.PrintCanonicalTypes = true;
   PP.UsePreferredNames = false;
   PP.AlwaysIncludeTypeForTemplateArgument = true;
@@ -673,8 +672,6 @@ void CGDebugInfo::CreateCompileUnit() {
   } else if (LO.OpenCL && (!CGM.getCodeGenOpts().DebugStrictDwarf ||
                            CGM.getCodeGenOpts().DwarfVersion >= 5)) {
     LangTag = llvm::dwarf::DW_LANG_OpenCL;
-  } else if (LO.RenderScript) {
-    LangTag = llvm::dwarf::DW_LANG_GOOGLE_RenderScript;
   } else if (LO.C11 && !(CGO.DebugStrictDwarf && CGO.DwarfVersion < 5)) {
       LangTag = llvm::dwarf::DW_LANG_C11;
   } else if (LO.C99) {
@@ -832,6 +829,13 @@ llvm::DIType *CGDebugInfo::CreateType(const BuiltinType *BT) {
 #define SVE_TYPE(Name, Id, SingletonId) case BuiltinType::Id:
 #include "clang/Basic/AArch64SVEACLETypes.def"
     {
+      if (BT->getKind() == BuiltinType::MFloat8) {
+        Encoding = llvm::dwarf::DW_ATE_unsigned_char;
+        BTName = BT->getName(CGM.getLangOpts());
+        // Bit size and offset of the type.
+        uint64_t Size = CGM.getContext().getTypeSize(BT);
+        return DBuilder.createBasicType(BTName, Size, Encoding);
+      }
       ASTContext::BuiltinVectorTypeInfo Info =
           // For svcount_t, only the lower 2 bytes are relevant.
           BT->getKind() == BuiltinType::SveCount
@@ -950,13 +954,19 @@ llvm::DIType *CGDebugInfo::CreateType(const BuiltinType *BT) {
     return SingletonId;                                                        \
   }
 #include "clang/Basic/WebAssemblyReferenceTypes.def"
-#define AMDGPU_OPAQUE_PTR_TYPE(Name, MangledName, AS, Width, Align, Id,        \
-                               SingletonId)                                    \
+#define AMDGPU_OPAQUE_PTR_TYPE(Name, Id, SingletonId, Width, Align, AS)        \
   case BuiltinType::Id: {                                                      \
     if (!SingletonId)                                                          \
       SingletonId =                                                            \
-          DBuilder.createForwardDecl(llvm::dwarf::DW_TAG_structure_type,       \
-                                     MangledName, TheCU, TheCU->getFile(), 0); \
+          DBuilder.createForwardDecl(llvm::dwarf::DW_TAG_structure_type, Name, \
+                                     TheCU, TheCU->getFile(), 0);              \
+    return SingletonId;                                                        \
+  }
+#define AMDGPU_NAMED_BARRIER_TYPE(Name, Id, SingletonId, Width, Align, Scope)  \
+  case BuiltinType::Id: {                                                      \
+    if (!SingletonId)                                                          \
+      SingletonId =                                                            \
+          DBuilder.createBasicType(Name, Width, llvm::dwarf::DW_ATE_unsigned); \
     return SingletonId;                                                        \
   }
 #include "clang/Basic/AMDGPUTypes.def"
@@ -1301,8 +1311,12 @@ llvm::DIType *CGDebugInfo::CreatePointerLikeType(llvm::dwarf::Tag Tag,
           CGM.getTypes().getTargetAddressSpace(PointeeTy));
   llvm::dwarf::MemorySpace MS = getDWARFMemorySpace(PointeeTy);
 
+  const BTFTagAttributedType *BTFAttrTy;
+  if (auto *Atomic = PointeeTy->getAs<AtomicType>())
+    BTFAttrTy = dyn_cast<BTFTagAttributedType>(Atomic->getValueType());
+  else
+    BTFAttrTy = dyn_cast<BTFTagAttributedType>(PointeeTy);
   SmallVector<llvm::Metadata *, 4> Annots;
-  auto *BTFAttrTy = dyn_cast<BTFTagAttributedType>(PointeeTy);
   while (BTFAttrTy) {
     StringRef Tag = BTFAttrTy->getAttr()->getBTFTypeTag();
     if (!Tag.empty()) {
@@ -1520,15 +1534,6 @@ llvm::DIType *CGDebugInfo::CreateType(const TemplateSpecializationType *Ty,
     return AliasTy;
   }
 
-  // Disable PrintCanonicalTypes here because we want
-  // the DW_AT_name to benefit from the TypePrinter's ability
-  // to skip defaulted template arguments.
-  //
-  // FIXME: Once -gsimple-template-names is enabled by default
-  // and we attach template parameters to alias template DIEs
-  // we don't need to worry about customizing the PrintingPolicy
-  // here anymore.
-  PP.PrintCanonicalTypes = false;
   printTemplateArgumentList(OS, Ty->template_arguments(), PP,
                             TD->getTemplateParameters());
   return DBuilder.createTypedef(Src, OS.str(), getOrCreateFile(Loc),
@@ -2435,7 +2440,7 @@ CGDebugInfo::CollectTemplateParams(std::optional<TemplateArgs> OArgs,
       TA.getAsTemplate().getAsTemplateDecl()->printQualifiedName(
           OS, getPrintingPolicy());
       TemplateParams.push_back(DBuilder.createTemplateTemplateParameter(
-          TheCU, Name, nullptr, OS.str(), defaultParameter));
+          TheCU, Name, nullptr, QualName, defaultParameter));
       break;
     }
     case TemplateArgument::Pack:
@@ -2700,7 +2705,7 @@ void CGDebugInfo::addHeapAllocSiteMetadata(llvm::CallBase *CI,
     return;
   llvm::MDNode *node;
   if (AllocatedTy->isVoidType())
-    node = llvm::MDNode::get(CGM.getLLVMContext(), std::nullopt);
+    node = llvm::MDNode::get(CGM.getLLVMContext(), {});
   else
     node = getOrCreateType(AllocatedTy, getOrCreateFile(Loc));
 
@@ -4383,8 +4388,7 @@ llvm::DISubroutineType *CGDebugInfo::getOrCreateFunctionType(const Decl *D,
              !CGM.getCodeGenOpts().EmitCodeView))
     // Create fake but valid subroutine type. Otherwise -verify would fail, and
     // subprogram DIE will miss DW_AT_decl_file and DW_AT_decl_line fields.
-    return DBuilder.createSubroutineType(
-        DBuilder.getOrCreateTypeArray(std::nullopt));
+    return DBuilder.createSubroutineType(DBuilder.getOrCreateTypeArray({}));
 
   if (const auto *Method = dyn_cast<CXXMethodDecl>(D))
     return getOrCreateMethodType(Method, F);
@@ -5511,6 +5515,9 @@ llvm::DIType *CGDebugInfo::CreateSelfType(const QualType &QualTy,
 void CGDebugInfo::EmitDeclareOfBlockDeclRefVariable(
     const VarDecl *VD, llvm::Value *Storage, CGBuilderTy &Builder,
     const CGBlockInfo &blockInfo, llvm::Instruction *InsertPoint) {
+  // FIXME: Workaround to prevent crash when using with -gheterogeneous-dwarf
+  if (CGM.getCodeGenOpts().isHeterogeneousDwarfEnabled())
+    return;
   assert(CGM.getCodeGenOpts().hasReducedDebugInfo());
   assert(!LexicalBlockStack.empty() && "Region stack mismatch, stack empty!");
 
@@ -5643,6 +5650,9 @@ void CGDebugInfo::EmitDeclareOfBlockLiteralArgVariable(const CGBlockInfo &block,
                                                        unsigned ArgNo,
                                                        llvm::AllocaInst *Alloca,
                                                        CGBuilderTy &Builder) {
+  // FIXME: Workaround to prevent crash when using with -gheterogeneous-dwarf
+  if (CGM.getCodeGenOpts().isHeterogeneousDwarfEnabled())
+    return;
   assert(CGM.getCodeGenOpts().hasReducedDebugInfo());
   ASTContext &C = CGM.getContext();
   const BlockDecl *blockDecl = block.getBlockDecl();
@@ -6095,7 +6105,7 @@ std::string CGDebugInfo::GetName(const Decl *D, bool Qualified) const {
       std::string CanonicalOriginalName;
       llvm::raw_string_ostream OriginalOS(CanonicalOriginalName);
       ND->getNameForDiagnostic(OriginalOS, PP, Qualified);
-      assert(EncodedOriginalNameOS.str() == OriginalOS.str());
+      assert(EncodedOriginalName == CanonicalOriginalName);
 #endif
     }
   }
@@ -6454,6 +6464,12 @@ void CGDebugInfo::EmitGlobalVariableForHeterogeneousDwarf(
 
 void CGDebugInfo::EmitExternalVariable(llvm::GlobalVariable *Var,
                                        const VarDecl *D) {
+  // FIXME: Workaround to prevent crash when using with -gheterogeneous-dwarf
+  // NOTE: Only currently reachable for BPF target, but check added for
+  // completeness and in case this changes.
+  if (CGM.getCodeGenOpts().isHeterogeneousDwarfEnabled())
+    return;
+
   assert(CGM.getCodeGenOpts().hasReducedDebugInfo());
   if (D->hasAttr<NoDebugAttr>())
     return;
