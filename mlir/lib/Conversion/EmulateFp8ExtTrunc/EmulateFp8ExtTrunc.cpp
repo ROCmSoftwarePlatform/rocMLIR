@@ -105,10 +105,10 @@ static LogicalResult canBeConverted(Type t, bool hasF8ConversionInstrs,
   Type elemType = getElementTypeOrSelf(t);
   if (!isFp8(elemType))
     return failure();
-  if (hasF8ConversionInstrs and isNanooF8(elemType)) {
+  if (hasF8ConversionInstrs && isNanooF8(elemType)) {
     return failure();
   }
-  if (hasOcpF8ConversionInstrs and isOcpF8(elemType)) {
+  if (hasOcpF8ConversionInstrs && isOcpF8(elemType)) {
     return failure();
   }
   if (auto vecType = dyn_cast<VectorType>(t))
@@ -773,13 +773,13 @@ void EmulateFp8ExtTruncPass::runOnOperation() {
       f8E5M2Locs;
   op->walk([&](TruncFOp op) {
     Type outElemType = getElementTypeOrSelf(op.getOut().getType());
-    if (not hasFp8ConversionInstrs) {
+    if (!hasFp8ConversionInstrs) {
       if (outElemType.isFloat8E4M3FNUZ())
         f8E4M3FNUZLocs.push_back(op->getLoc());
       else if (outElemType.isFloat8E5M2FNUZ())
         f8E5M2FNUZLocs.push_back(op->getLoc());
     }
-    if (not hasOcpFp8ConversionInstrs) {
+    if (!hasOcpFp8ConversionInstrs) {
       if (outElemType.isFloat8E4M3FN())
         f8E4M3FNLocs.push_back(op->getLoc());
       else if (outElemType.isFloat8E5M2())
