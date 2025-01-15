@@ -35,8 +35,11 @@ bool validOperationGemmOut(Operation& op) {
 
 LogicalResult mlir::rock::checkValidOutputFusion(linalg::GenericOp genericOp, Value gemmResult, SmallVector<std::tuple<Operation*, int>>& adds) {
   /* We can only fuse:
-  - add gemmResult, otherTensor (which will be converted to add gemmResult, otherTensor/splitKFactor)
-  - mul gemmResult, otherTensor
+  - add/sub gemmResult, otherTensor (which will be converted to add gemmResult, otherTensor/splitKFactor)
+  - add/sub gemmResult, gemmResult
+  - mul/div gemmResult, otherTensor
+  - neg
+  - type conversion functions
   Where gemmResult != otherTensor for all cases.
   */
   auto outputs = genericOp.getOutputs();
