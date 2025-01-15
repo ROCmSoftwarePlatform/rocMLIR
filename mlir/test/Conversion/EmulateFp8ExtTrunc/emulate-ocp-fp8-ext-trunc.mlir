@@ -1,4 +1,5 @@
 // RUN: rocmlir-opt -pass-pipeline='builtin.module(gpu.module(emulate-fp8-ext-trunc),emulate-fp8-ext-trunc)' -split-input-file %s | FileCheck %s
+// RUN: rocmlir-opt -pass-pipeline='builtin.module(gpu.module(emulate-fp8-ext-trunc{f8-conversion-instrs=false ocpf8-conversion-instrs=true}),emulate-fp8-ext-trunc{f8-conversion-instrs=false ocpf8-conversion-instrs=true})' -split-input-file %s | FileCheck %s --check-prefix=MI350_F8
 
 module {
   func.func @ext_scalar(%arg0: f8E5M2) -> f16 {
@@ -26,6 +27,43 @@ module {
   }
   // CHECK-LABEL: func.func private @_rocmlir_trunc_f32_to_f8E5M2
   // CHECK-LABEL: memref.global "private" constant @__rocmlir_extf_tbl_f8E5M2
+}
+
+// -----
+
+module {
+  func.func @mixed_ext_fp8(%arg0: f8E5M2FNUZ, %arg1: f8E5M2) -> f16 {
+    // MI350_F8-LABEL: @mixed_ext_fp8
+    // MI350_F8-SAME: ([[ARG0:%.+]]: f8E5M2FNUZ,
+    // MI350_F8-SAME: [[ARG1:%.+]]: f8E5M2)
+    // MI350_F8: [[TABLE:%.+]] = memref.get_global @__rocmlir_extf_tbl_f8E5M2FNUZ : memref<256xf32>
+    // MI350_F8: [[BYTE:%.+]] = arith.bitcast [[ARG0]] : f8E5M2FNUZ to i8
+    // MI350_F8: [[LONGBYTE:%.+]] = arith.extui [[BYTE]] : i8 to i32
+    // MI350_F8: [[IDX:%.+]] = arith.index_cast [[LONGBYTE]] : i32 to index
+    // MI350_F8: [[EXT:%.+]] = memref.load [[TABLE]]{{\[}}[[IDX]]]
+    // MI350_F8: [[TRUNC:%.+]] = arith.truncf [[EXT]] : f32 to f16
+    // MI350_F8: [[OCPF8:%.+]] = arith.extf [[ARG1]] : f8E5M2 to f16
+    // MI350_F8: [[RET:%.+]] = arith.addf [[TRUNC]], [[OCPF8]] : f16
+    // MI350_F8: return [[RET]]
+    %0 = arith.extf %arg0 : f8E5M2FNUZ to f16
+    %1 = arith.extf %arg1 : f8E5M2 to f16
+    %ret = arith.addf %0, %1 : f16
+    return %ret : f16
+  }
+
+  // MI350_F8-LABEL: @mixed_trunc_fp8
+  // MI350_F8-SAME: ([[ARG0:%.+]]: f16, [[ARG1:%.+]]: f16)
+  func.func @mixed_trunc_fp8(%arg0: f16, %arg1: f16) -> f8E5M2FNUZ {
+    // MI350_F8: [[EXT:%.+]] = arith.extf [[ARG0]] : f16 to f32
+    // MI350_F8: [[TRUNC0:%.+]] = call @_rocmlir_trunc_f32_to_f8E5M2FNUZ([[EXT]])
+    // MI350_F8: [[TRUNC1:%.+]] = arith.truncf [[ARG1]] : f16 to f8E5M2
+    // MI350_F8: return [[TRUNC0]]
+    %0 = arith.truncf %arg0 : f16 to f8E5M2FNUZ
+    %1 = arith.truncf %arg1 : f16 to f8E5M2
+    return %0 : f8E5M2FNUZ
+  }
+  // MI350_F8-LABEL: func.func private @_rocmlir_trunc_f32_to_f8E5M2FNUZ
+  // MI350_F8-LABEL: memref.global "private" constant @__rocmlir_extf_tbl_f8E5M2FNUZ
 }
 
 // -----
