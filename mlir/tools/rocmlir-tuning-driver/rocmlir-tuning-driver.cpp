@@ -331,11 +331,9 @@ static LogicalResult runTuningLoop(ModuleOp source) {
       op->setAttr("perf_config", perfConfigAttr);
     });
 
-    if (rock::isSplitKRequested(tuneCopy.get(), perfConfig)) {
-      if (failed(rock::testFusionLegality(tuneCopy.get()))) {
-        llvm::outs() << "N/A\n";
-        continue;
-      }
+    if (!rock::isModuleFusible(tuneCopy.get(), perfConfig)) {
+      llvm::outs() << "N/A\n";
+      continue;
     }
 
     if (failed(applicability.run(tuneCopy.get()))) {

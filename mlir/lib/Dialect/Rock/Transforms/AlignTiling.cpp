@@ -799,20 +799,8 @@ static void reconfigureLAGeneric(LinalgAlignRewriter &b,
 
 static LogicalResult canFuseAcrossAtomic(LinalgAlignRewriter &b,
                                          linalg::GenericOp laGeneric) {
-  auto opCanSwapWithAtomic = [](Operation &op) -> bool {
-    return llvm::TypeSwitch<Operation &, bool>(op)
-        .Case<linalg::YieldOp>([](linalg::YieldOp ignored) { return true; })
-        .Case<arith::TruncFOp>([](arith::TruncFOp truncOp) {
-          Type resultType = truncOp.getOut().getType();
-          return isa<Float32Type, Float16Type>(resultType);
-        })
-        .Case<arith::TruncIOp>([](arith::TruncIOp truncOp) {
-          return truncOp.getOut().getType().isInteger(32);
-        })
-        .Default([](Operation &ignored) { return false; });
-  };
-  return success(
-      llvm::all_of(laGeneric.getRegion().getOps(), opCanSwapWithAtomic));
+  auto outElementType = cast<ShapedType>(laGeneric.getOutputs()[0].getType()).getElementType();
+  return success(outElementType.isF32() || outElementType.isF16() || outElementType.isInteger(32));
 }
 
 /// Return true if all the operations inside a given `linalg.generic` are known

@@ -5,9 +5,10 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===-----------------------------------------------------===//
-#ifndef ROCK_UTILITY_FISION_H
-#define ROCK_UTILITY_FISION_H
+#ifndef ROCK_UTILITY_FUSION_H
+#define ROCK_UTILITY_FUSION_H
 
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Support/LogicalResult.h"
 
@@ -33,7 +34,11 @@ LogicalResult testFusionLegality(func::FuncOp func);
 // Note, this overloaded function assumes that `ModuleOp` contains
 // a single `func:FuncOp`
 LogicalResult testFusionLegality(ModuleOp mod);
+
+// Checks whether the output fusion linalg::GenericOp is valid. Assuming a split-k kernel.
+LogicalResult checkValidOutputFusion(linalg::GenericOp genericOp, Value gemmResult, SmallVector<std::tuple<Operation*, int>>& adds);
+
 } // end namespace rock
 } // end namespace mlir
 
-#endif // ROCK_UTILITY_FISION_H
+#endif // ROCK_UTILITY_FUSION_H

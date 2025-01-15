@@ -72,7 +72,7 @@ struct GemmRewritePattern : public OpConversionPattern<GemmOp> {
       : OpConversionPattern<GemmOp>(context), bufferDeps(bufferDeps) {}
 
   LogicalResult matchAndRewrite(GemmOp op, GemmOpAdaptor adaptor,
-                                ConversionPatternRewriter &b) const override;
+                                ConversionPatternRewriter &rw) const override;
 
   LogicalResult computeGridSize(ConversionPatternRewriter &rw, GemmOp op,
                                 Value a, Value b) const;
@@ -87,7 +87,7 @@ struct GemmRewritePattern : public OpConversionPattern<GemmOp> {
 struct AttentionRewritePattern : public OpConversionPattern<AttentionOp> {
   using OpConversionPattern<AttentionOp>::OpConversionPattern;
   LogicalResult matchAndRewrite(AttentionOp op, AttentionOpAdaptor adaptor,
-                                ConversionPatternRewriter &b) const override;
+                                ConversionPatternRewriter &rw) const override;
 
   LogicalResult computeGridSize(ConversionPatternRewriter &rw, AttentionOp op,
                                 Value queries, Value keys, Value values) const;
