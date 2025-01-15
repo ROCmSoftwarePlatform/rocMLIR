@@ -91,66 +91,61 @@ int main(int argc, char *argv[]) {
                                           &DataBc);
   checkError(Status, "amd_comgr_action_data_get_data");
 
-#if 0
+#if 1
   // write bitcode
   {
-    size_t bytes_size = 0;
-    char *bytes = NULL;
+    size_t BytesSize = 0;
+    char *Bytes = NULL;
 
-    Status = amd_comgr_get_data(DataBc, &bytes_size, bytes);
+    Status = amd_comgr_get_data(DataBc, &BytesSize, Bytes);
     checkError(Status, "amd_comgr_get_data");
 
-    bytes = (char *) malloc(bytes_size);
+    Bytes = (char *)malloc(BytesSize);
 
-    Status = amd_comgr_get_data(DataBc, &bytes_size, bytes);
+    Status = amd_comgr_get_data(DataBc, &BytesSize, Bytes);
     checkError(Status, "amd_comgr_get_data");
 
-    const char *bitcode_file = "comgr_mangled.bc";
-    FILE *file = fopen(bitcode_file, "wb");
+    const char *BitcodeFile = "comgr_mangled.bc";
+    FILE *File = fopen(BitcodeFile, "wb");
 
-    if (file)
-      fwrite(bytes, bytes_size, 1, file);
+    if (File)
+      fwrite(Bytes, BytesSize, 1, File);
     else
       return AMD_COMGR_STATUS_ERROR;
 
-    fclose(file);
-    free(bytes);
+    fclose(File);
+    free(Bytes);
   }
 #endif
 
-  size_t numNames;
-  Status = amd_comgr_populate_mangled_names(DataBc, &numNames);
+  size_t NumNames;
+  Status = amd_comgr_populate_mangled_names(DataBc, &NumNames);
   checkError(Status, "amd_comgr_populate_mangled_names");
 
-  const char *bcNames[] = {"_Z7source1Pi"};
-  size_t bcNumNames = 1;
-  bool bcFound[1] = {false};
+  char *MangledSubstr = "__hip_cuid_";
+  bool BcFound = false;
 
-  for (size_t I = 0; I < numNames; ++I) {
+  for (size_t I = 0; I < NumNames; ++I) {
     size_t Size;
     Status = amd_comgr_get_mangled_name(DataBc, I, &Size, NULL);
     checkError(Status, "amd_comgr_get_mangled_name");
 
-    char *mName = calloc(Size, sizeof(char));
-    Status = amd_comgr_get_mangled_name(DataBc, I, &Size, mName);
+    char *MName = calloc(Size, sizeof(char));
+    Status = amd_comgr_get_mangled_name(DataBc, I, &Size, MName);
     checkError(Status, "amd_comgr_get_mangled_name");
 
-    for (size_t J = 0; J < bcNumNames; ++J) {
-      if (!strcmp(mName, bcNames[J])) {
-        bcFound[J] = true;
-      }
+    if (strstr(MName, MangledSubstr)) {
+      BcFound = true;
     }
 
-    free(mName);
+    free(MName);
   }
 
-  for (size_t I = 0; I < bcNumNames; I++) {
-    if (!bcFound[I]) {
-      printf("amd_get_mangled_name from bc Failed: "
-             "(expected '%s')\n",
-             bcNames[I]);
-      exit(1);
-    }
+  if (!BcFound) {
+    printf("amd_get_mangled_name from bc Failed: "
+           "(expected '%s*')\n",
+           MangledSubstr);
+    exit(1);
   }
 
   Status = amd_comgr_create_data_set(&DataSetLinked);
@@ -216,119 +211,31 @@ int main(int argc, char *argv[]) {
   Status = amd_comgr_action_data_get_data(
       DataSetExec, AMD_COMGR_DATA_KIND_EXECUTABLE, 0, &DataExec);
 
-  Status = amd_comgr_populate_mangled_names(DataExec, &numNames);
+  Status = amd_comgr_populate_mangled_names(DataExec, &NumNames);
 
-  const char *execNames[] = {"_Z7source1Pi", "_Z7source1Pi.kd"};
-  size_t execNumNames = 2;
-  bool execFound[2] = {false, false};
+  bool ExecFound = false;
 
-  for (size_t I = 0; I < numNames; ++I) {
+  for (size_t I = 0; I < NumNames; ++I) {
     size_t Size;
     Status = amd_comgr_get_mangled_name(DataExec, I, &Size, NULL);
     checkError(Status, "amd_comgr_get_mangled_name");
 
-    char *mName = calloc(Size, sizeof(char));
-    Status = amd_comgr_get_mangled_name(DataExec, I, &Size, mName);
+    char *MName = calloc(Size, sizeof(char));
+    Status = amd_comgr_get_mangled_name(DataExec, I, &Size, MName);
     checkError(Status, "amd_comgr_get_mangled_name");
 
-    for (size_t J = 0; J < execNumNames; ++J) {
-      if (!strcmp(mName, execNames[J])) {
-        execFound[J] = true;
-      }
+    if (strstr(MName, MangledSubstr)) {
+      ExecFound = true;
     }
 
-    free(mName);
+    free(MName);
   }
 
-  for (size_t I = 0; I < execNumNames; I++) {
-    if (!execFound[I]) {
-      printf("amd_get_mangled_name from bc Failed: "
-             "(expected '%s')\n",
-             execNames[I]);
-      exit(1);
-    }
-  }
-
-  //
-  // Test AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE
-  //
-
-  Status = amd_comgr_create_data_set(&DataSetReloc2);
-  checkError(Status, "amd_comgr_create_data_set");
-
-  Status = amd_comgr_do_action(AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE,
-                               DataAction, DataSetIn, DataSetReloc2);
-  checkError(Status, "amd_comgr_do_action");
-
-  Status = amd_comgr_action_data_count(DataSetReloc2,
-                                       AMD_COMGR_DATA_KIND_RELOCATABLE, &Count);
-  checkError(Status, "amd_comgr_action_data_count");
-
-  if (Count != 1) {
-    printf("AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE Failed: "
-           "produced %zu source objects (expected 1)\n",
-           Count);
+  if (!ExecFound) {
+    printf("amd_get_mangled_name from exec Failed: "
+           "(expected '%s*')\n",
+           MangledSubstr);
     exit(1);
-  }
-
-  Status = amd_comgr_create_data_set(&DataSetExec2);
-  checkError(Status, "amd_comgr_create_data_set");
-
-  Status = amd_comgr_action_info_set_option_list(DataAction, NULL, 0);
-  checkError(Status, "amd_comgr_action_info_set_option_list");
-
-  Status = amd_comgr_do_action(AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE,
-                               DataAction, DataSetReloc2, DataSetExec2);
-  checkError(Status, "amd_comgr_do_action");
-
-  Status = amd_comgr_action_data_count(DataSetExec2,
-                                       AMD_COMGR_DATA_KIND_EXECUTABLE, &Count);
-  checkError(Status, "amd_comgr_action_data_count");
-
-  if (Count != 1) {
-    printf("AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE Failed: "
-           "produced %zu executable objects (expected 1)\n",
-           Count);
-    exit(1);
-  }
-
-  // Get Mangled Names
-  amd_comgr_data_t DataExec2;
-
-  Status = amd_comgr_action_data_get_data(
-      DataSetExec2, AMD_COMGR_DATA_KIND_EXECUTABLE, 0, &DataExec2);
-
-  Status = amd_comgr_populate_mangled_names(DataExec2, &numNames);
-
-  for (size_t I = 0; I < execNumNames; ++I) {
-    execFound[I] = false;
-  }
-
-  for (size_t I = 0; I < numNames; ++I) {
-    size_t Size;
-    Status = amd_comgr_get_mangled_name(DataExec, I, &Size, NULL);
-    checkError(Status, "amd_comgr_get_mangled_name");
-
-    char *mName = calloc(Size, sizeof(char));
-    Status = amd_comgr_get_mangled_name(DataExec, I, &Size, mName);
-    checkError(Status, "amd_comgr_get_mangled_name");
-
-    for (size_t J = 0; J < execNumNames; ++J) {
-      if (!strcmp(mName, execNames[J])) {
-        execFound[J] = true;
-      }
-    }
-
-    free(mName);
-  }
-
-  for (size_t I = 0; I < execNumNames; I++) {
-    if (!execFound[I]) {
-      printf("amd_get_mangled_name from bc Failed: "
-             "(expected '%s')\n",
-             execNames[I]);
-      exit(1);
-    }
   }
 
   Status = amd_comgr_release_data(DataSource);
@@ -346,10 +253,6 @@ int main(int argc, char *argv[]) {
   Status = amd_comgr_destroy_data_set(DataSetReloc);
   checkError(Status, "amd_comgr_destroy_data_set");
   Status = amd_comgr_destroy_data_set(DataSetExec);
-  checkError(Status, "amd_comgr_destroy_data_set");
-  Status = amd_comgr_destroy_data_set(DataSetReloc2);
-  checkError(Status, "amd_comgr_destroy_data_set");
-  Status = amd_comgr_destroy_data_set(DataSetExec2);
   checkError(Status, "amd_comgr_destroy_data_set");
   Status = amd_comgr_destroy_action_info(DataAction);
   checkError(Status, "amd_comgr_destroy_action_info");

@@ -94,6 +94,7 @@ include "arm_immcheck_incl.td"
 // l: int64_t
 // m: uint32_t
 // n: uint64_t
+// >: fpm_t
 
 // [: svuint8_t
 // t: svint32_t
@@ -103,6 +104,7 @@ include "arm_immcheck_incl.td"
 // M: svfloat32_t
 // N: svfloat64_t
 // $: svbfloat16_t
+// ~: svmfloat8_t
 
 // J: Prefetch type (sv_prfop)
 
@@ -162,6 +164,7 @@ def EltTyBool16  : EltType<10>;
 def EltTyBool32  : EltType<11>;
 def EltTyBool64  : EltType<12>;
 def EltTyBFloat16 : EltType<13>;
+def EltTyMFloat8  : EltType<14>;
 
 class MemEltType<int val> {
   int Value = val;
@@ -234,6 +237,7 @@ def IsInOutZA                       : FlagType<0x200000000000>;
 def IsInZT0                         : FlagType<0x400000000000>;
 def IsOutZT0                        : FlagType<0x800000000000>;
 def IsInOutZT0                      : FlagType<0x1000000000000>;
+def SetsFPMR                        : FlagType<0x2000000000000>;
 
 defvar InvalidMode = "";
 

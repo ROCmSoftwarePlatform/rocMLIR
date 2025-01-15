@@ -357,11 +357,12 @@ Value createProduct(OpBuilder &builder, Location loc, ArrayRef<Value> values,
       [&arithBuilder](Value acc, Value v) { return arithBuilder.mul(acc, v); });
 }
 
-/// Map strings to float types. This function is here because no one else needs
-/// it yet, feel free to abstract it out.
+/// Map strings to float types.
 std::optional<FloatType> parseFloatType(MLIRContext *ctx, StringRef name) {
   Builder b(ctx);
   return llvm::StringSwitch<std::optional<FloatType>>(name)
+      .Case("f4E2M1FN", b.getFloat4E2M1FNType())
+      .Case("f6E2M3FN", b.getFloat6E2M3FNType())
       .Case("f6E3M2FN", b.getFloat6E3M2FNType())
       .Case("f8E5M2", b.getFloat8E5M2Type())
       .Case("f8E4M3", b.getFloat8E4M3Type())
@@ -369,6 +370,7 @@ std::optional<FloatType> parseFloatType(MLIRContext *ctx, StringRef name) {
       .Case("f8E5M2FNUZ", b.getFloat8E5M2FNUZType())
       .Case("f8E4M3FNUZ", b.getFloat8E4M3FNUZType())
       .Case("f8E3M4", b.getFloat8E3M4Type())
+      .Case("f8E8M0FNU", b.getFloat8E8M0FNUType())
       .Case("bf16", b.getBF16Type())
       .Case("f16", b.getF16Type())
       .Case("f32", b.getF32Type())

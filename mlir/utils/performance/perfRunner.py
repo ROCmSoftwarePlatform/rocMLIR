@@ -397,6 +397,8 @@ class ConvConfiguration(PerfConfiguration):
             dataType = 'i8'
         elif argv[0] == 'convfp8_fp8':
             dataType = 'fp8_fp8'
+        elif argv[0] == 'convfp8':
+            dataType = 'fp8'
         elif argv[0] == 'convfp8_bf8':
             dataType = 'fp8_bf8'
         elif argv[0] == 'convbf8_fp8':
@@ -472,7 +474,7 @@ class ConvConfiguration(PerfConfiguration):
                    group, arch, numCU)
 
     def toCommandLine(self):
-        return (f"conv{ {'f32':'', 'f16':'fp16', 'bf16':'bfp16', 'i8':'int8'}[self.dataType]} "
+        return (f"conv{ {'f32':'', 'f16':'fp16', 'bf16':'bfp16', 'i8':'int8','fp8_fp8':'fp8_fp8', 'fp8': 'fp8'}[self.dataType]} "
                 + f"-F { {'fwd':1, 'bwd':2, 'wrw':4}[self.direction]} "
                 + f"-f {self.INVERSE_FILTER_LAYOUTS[self.filterLayout]} -I {self.inputLayout.upper()} "
                 + f"-O {self.INVERSE_OUTPUT_LAYOUTS[self.outputLayout]} "
@@ -485,7 +487,7 @@ class ConvConfiguration(PerfConfiguration):
                     n: int, c: int, hi: int, wi: int, k: int, y: int, x: int,
                     convStrideH: int, convStrideW: int, paddingH: int, paddingW: int,
                     dilationH: int, dilationW: int, group: int, arch: str, numCU: int):
-        if dtype not in {"f16", "f32", "bf16", "i8", "fp8"}:
+        if dtype not in {"f16", "f32", "bf16", "i8", "fp8_fp8", "fp8"}:
             raise ValueError(f"Invalid datatype: {dtype}")
         if direction not in {"fwd", "bwd", "wrw"}:
             raise ValueError(f"Invalid direction: {direction}")

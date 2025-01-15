@@ -9,7 +9,6 @@
 //  This file implements semantic analysis member access expressions.
 //
 //===----------------------------------------------------------------------===//
-#include "clang/AST/ASTLambda.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclObjC.h"
 #include "clang/AST/DeclTemplate.h"
@@ -20,7 +19,6 @@
 #include "clang/Sema/Overload.h"
 #include "clang/Sema/Scope.h"
 #include "clang/Sema/ScopeInfo.h"
-#include "clang/Sema/SemaInternal.h"
 #include "clang/Sema/SemaObjC.h"
 #include "clang/Sema/SemaOpenMP.h"
 
@@ -379,7 +377,7 @@ CheckExtVectorComponent(Sema &S, QualType baseType, ExprValueKind &VK,
   //
   // FIXME: This logic can be greatly simplified by splitting it along
   // halving/not halving and reworking the component checking.
-  const ExtVectorType *vecType = baseType->getAs<ExtVectorType>();
+  const ExtVectorType *vecType = baseType->castAs<ExtVectorType>();
 
   // The vector accessor can't exceed the number of elements.
   const char *compStr = CompName->getNameStart();
@@ -790,9 +788,6 @@ ExprResult Sema::BuildMemberReferenceExpr(
     ActOnMemberAccessExtraArgs *ExtraArgs) {
   LookupResult R(*this, NameInfo, LookupMemberName);
 
-  if (SS.isInvalid())
-    return ExprError();
-
   // Implicit member accesses.
   if (!Base) {
     TypoExpr *TE = nullptr;
@@ -826,6 +821,11 @@ ExprResult Sema::BuildMemberReferenceExpr(
     // LookupMemberExpr can modify Base, and thus change BaseType
     BaseType = Base->getType();
   }
+
+  // BuildMemberReferenceExpr expects the nested-name-specifier, if any, to be
+  // valid.
+  if (SS.isInvalid())
+    return ExprError();
 
   return BuildMemberReferenceExpr(Base, BaseType,
                                   OpLoc, IsArrow, SS, TemplateKWLoc,
@@ -984,8 +984,9 @@ Sema::BuildMemberReferenceExpr(Expr *BaseExpr, QualType BaseExprType,
   // arrow operator was used with a dependent non-pointer object expression,
   // build a CXXDependentScopeMemberExpr.
   if (R.wasNotFoundInCurrentInstantiation() ||
-      (IsArrow && !BaseExprType->isPointerType() &&
-       BaseExprType->isDependentType()))
+      (R.getLookupName().getCXXOverloadedOperator() == OO_Equal &&
+       (SS.isSet() ? SS.getScopeRep()->isDependent()
+                   : BaseExprType->isDependentType())))
     return ActOnDependentMemberExpr(BaseExpr, BaseExprType, IsArrow, OpLoc, SS,
                                     TemplateKWLoc, FirstQualifierInScope,
                                     R.getLookupNameInfo(), TemplateArgs);
@@ -1322,8 +1323,8 @@ static ExprResult LookupMemberExpr(Sema &S, LookupResult &R,
       // was encountered while looking for the overloaded operator->.
       if (!S.getLangOpts().CPlusPlus) {
         S.Diag(OpLoc, diag::err_typecheck_member_reference_suggestion)
-          << BaseType << int(IsArrow) << BaseExpr.get()->getSourceRange()
-          << FixItHint::CreateReplacement(OpLoc, ".");
+            << BaseType << int(IsArrow) << BaseExpr.get()->getSourceRange()
+            << FixItHint::CreateReplacement(OpLoc, ".");
       }
       IsArrow = false;
     } else {
@@ -1349,7 +1350,7 @@ static ExprResult LookupMemberExpr(Sema &S, LookupResult &R,
   }
 
   // Handle field access to simple records.
-  if (BaseType->getAsRecordDecl() || BaseType->isDependentType()) {
+  if (BaseType->getAsRecordDecl()) {
     TypoExpr *TE = nullptr;
     if (LookupMemberExprInRecord(S, R, BaseExpr.get(), BaseType, OpLoc, IsArrow,
                                  SS, HasTemplateArgs, TemplateKWLoc, TE))
@@ -1745,14 +1746,9 @@ static ExprResult LookupMemberExpr(Sema &S, LookupResult &R,
 
 ExprResult Sema::ActOnMemberAccessExpr(Scope *S, Expr *Base,
                                        SourceLocation OpLoc,
-                                       tok::TokenKind OpKind,
-                                       CXXScopeSpec &SS,
+                                       tok::TokenKind OpKind, CXXScopeSpec &SS,
                                        SourceLocation TemplateKWLoc,
-                                       UnqualifiedId &Id,
-                                       Decl *ObjCImpDecl) {
-  if (SS.isSet() && SS.isInvalid())
-    return ExprError();
-
+                                       UnqualifiedId &Id, Decl *ObjCImpDecl) {
   // Warn about the explicit constructor calls Microsoft extension.
   if (getLangOpts().MicrosoftExt &&
       Id.getKind() == UnqualifiedIdKind::IK_ConstructorName)
@@ -1878,8 +1874,16 @@ Sema::BuildFieldReferenceExpr(Expr *BaseExpr, bool IsArrow,
           Context.getAttributedType(attr::NoDeref, MemberType, MemberType);
   }
 
-  auto *CurMethod = dyn_cast<CXXMethodDecl>(CurContext);
-  if (!(CurMethod && CurMethod->isDefaulted()))
+  auto isDefaultedSpecialMember = [this](const DeclContext *Ctx) {
+    auto *Method = dyn_cast<CXXMethodDecl>(CurContext);
+    if (!Method || !Method->isDefaulted())
+      return false;
+
+    return getDefaultedFunctionKind(Method).isSpecialMember();
+  };
+
+  // Implicit special members should not mark fields as used.
+  if (!isDefaultedSpecialMember(CurContext))
     UnusedPrivateFields.remove(Field);
 
   ExprResult Base = PerformObjectMemberConversion(BaseExpr, SS.getScopeRep(),

@@ -1005,6 +1005,13 @@ LazyValueInfoImpl::solveBlockValueInsertElement(InsertElementInst *IEI,
   if (!OptVecVal)
     return std::nullopt;
 
+  // Bail out if the inserted element is a constant expression. Unlike other
+  // ValueLattice types, these are not considered an implicit splat when a
+  // vector type is used.
+  // We could call ConstantFoldInsertElementInstruction here to handle these.
+  if (OptEltVal->isConstant())
+    return ValueLatticeElement::getOverdefined();
+
   Res.mergeIn(*OptVecVal);
   return Res;
 }
@@ -1186,6 +1193,20 @@ std::optional<ValueLatticeElement> LazyValueInfoImpl::getValueFromICmpCondition(
         });
     if (CR)
       return ValueLatticeElement::getRange(*CR);
+  }
+
+  // a - b or ptrtoint(a) - ptrtoint(b) ==/!= 0 if a ==/!= b
+  Value *X, *Y;
+  if (ICI->isEquality() && match(Val, m_Sub(m_Value(X), m_Value(Y)))) {
+    // Peek through ptrtoints
+    match(X, m_PtrToIntSameSize(DL, m_Value(X)));
+    match(Y, m_PtrToIntSameSize(DL, m_Value(Y)));
+    if ((X == LHS && Y == RHS) || (X == RHS && Y == LHS)) {
+      Constant *NullVal = Constant::getNullValue(Val->getType());
+      if (EdgePred == ICmpInst::ICMP_EQ)
+        return ValueLatticeElement::get(NullVal);
+      return ValueLatticeElement::getNot(NullVal);
+    }
   }
 
   return ValueLatticeElement::getOverdefined();
@@ -1572,7 +1593,8 @@ ValueLatticeElement LazyValueInfoImpl::getValueAtUse(const Use &U) {
     // This also disallows looking through phi nodes: If the phi node is part
     // of a cycle, we might end up reasoning about values from different cycle
     // iterations (PR60629).
-    if (!CurrI->hasOneUse() || !isSafeToSpeculativelyExecute(CurrI))
+    if (!CurrI->hasOneUse() ||
+        !isSafeToSpeculativelyExecuteWithVariableReplaced(CurrI))
       break;
     CurrU = &*CurrI->use_begin();
   }
@@ -1612,7 +1634,7 @@ LazyValueInfoImpl &LazyValueInfo::getOrCreateImpl(const Module *M) {
     assert(M && "getCache() called with a null Module");
     const DataLayout &DL = M->getDataLayout();
     Function *GuardDecl =
-        M->getFunction(Intrinsic::getName(Intrinsic::experimental_guard));
+        Intrinsic::getDeclarationIfExists(M, Intrinsic::experimental_guard);
     PImpl = new LazyValueInfoImpl(AC, DL, GuardDecl);
   }
   return *static_cast<LazyValueInfoImpl *>(PImpl);

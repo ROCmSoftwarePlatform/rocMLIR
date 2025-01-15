@@ -12,9 +12,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "OpenMP/OMPT/Interface.h"
-#include "OmptCommonDefs.h"
 #include "OffloadPolicy.h"
 #include "OpenMP/OMPT/Callback.h"
+#include "OpenMP/OMPT/OmptCommonDefs.h"
 #include "OpenMP/omp.h"
 #include "PluginManager.h"
 #include "omptarget.h"
@@ -90,7 +90,6 @@ EXTERN void __tgt_rtl_deinit() { deinitRuntime(); }
 ////////////////////////////////////////////////////////////////////////////////
 /// adds a target shared library to the target execution image
 EXTERN void __tgt_register_lib(__tgt_bin_desc *Desc) {
-  TIMESCOPE();
   initRuntime();
   if (PM->delayRegisterLib(Desc))
     return;
@@ -189,10 +188,8 @@ targetData(ident_t *Loc, int64_t DeviceId, int32_t ArgNum, void **ArgsBase,
     Rc = AsyncInfo.synchronize();
 
 #ifdef OMPT_SUPPORT
-  if (__tgt_async_info *AI = AsyncInfo; AI->OmptEventInfo) {
-    AI->OmptEventInfo->RIFunction = std::monostate();
+  if (__tgt_async_info *AI = AsyncInfo; AI->OmptEventInfo)
     delete AI->OmptEventInfo;
-  }
 #endif
 
   handleTargetOutcome(Rc == OFFLOAD_SUCCESS, Loc);
@@ -473,15 +470,12 @@ static inline int targetKernel(ident_t *Loc, int64_t DeviceId, int32_t NumTeams,
   }
 
 #ifdef OMPT_SUPPORT
-  if (__tgt_async_info *AI = AsyncInfo; AI->OmptEventInfo) {
-    AI->OmptEventInfo->RIFunction = std::monostate();
+  if (__tgt_async_info *AI = AsyncInfo; AI->OmptEventInfo)
     delete AI->OmptEventInfo;
-  }
 
   for (TargetAsyncInfoTy *LocalTAI : TargetAsyncInfos) {
     AsyncInfoTy &AsyncInfo = *LocalTAI;
     if (__tgt_async_info *AI = AsyncInfo; AI->OmptEventInfo) {
-      AI->OmptEventInfo->RIFunction = std::monostate();
       delete AI->OmptEventInfo;
     }
   }

@@ -38,7 +38,6 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <iterator>
@@ -160,7 +159,7 @@ namespace {
       // may be invoked multiple times requiring it to save these analyses to be
       // used by RA later.
       AU.addPreserved<LiveIntervalsWrapperPass>();
-      AU.addPreserved<LiveDebugVariables>();
+      AU.addPreserved<LiveDebugVariablesWrapperLegacy>();
 
       MachineFunctionPass::getAnalysisUsage(AU);
     }
@@ -472,8 +471,8 @@ bool StackSlotColoring::RemoveDeadStores(MachineBasicBlock* MBB) {
     MachineBasicBlock::iterator NextMI = std::next(I);
     MachineBasicBlock::iterator ProbableLoadMI = I;
 
-    unsigned LoadReg = 0;
-    unsigned StoreReg = 0;
+    Register LoadReg;
+    Register StoreReg;
     unsigned LoadSize = 0;
     unsigned StoreSize = 0;
     if (!(LoadReg = TII->isLoadFromStackSlot(*I, FirstSS, LoadSize)))

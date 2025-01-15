@@ -209,7 +209,7 @@ private:
     size_t original_pos;
     int64_t padding_amount;
 
-    bool operator<(const InitParamData &rhs) {
+    bool operator<(const InitParamData &rhs) const {
       if (this->padding_amount < rhs.padding_amount) {
         return true;
       } else if (this->padding_amount == rhs.padding_amount) {
@@ -285,8 +285,9 @@ public:
 //
 class PopulateParams : public BasePopulateParams<InitParamsNonAccel> {
 private:
-  static constexpr size_t nInitParameters = 30;
-  static const InitParamsNonAccel initParameters[nInitParameters];
+#define NonAccel_DECLARATIONS_GEN
+#include "mlir/Dialect/Rock/Tuning/QuickTuningPerfconfigs.inc"
+#undef NonAccel_DECLARATIONS_GEN
   // if can't select config from above , use this config to do
   // padding kernel for example , GemmK/block is 16 , if your gemmK is  13 , we
   // add more 3 gemmk
@@ -387,19 +388,9 @@ protected:
 // Xdlops interface
 //
 class PopulateParamsXDL : public PopulateParamsAccel {
-  static constexpr size_t nInitParameters = 40;
-  // Initial tuning parameters for forward convolution and backward
-  // convolution.
-  static const InitParamsAccel initParameters[nInitParameters];
-
-  static constexpr size_t nInitParametersFp16 = 40;
-  // Tuning parameters for fp16/bf16 convolutions.
-  static const InitParamsAccel initParametersFp16[nInitParametersFp16];
-
-  static constexpr size_t nInitParametersForward8Bit = 40;
-  // Tuning parameters for i8 convolutions.
-  static const InitParamsAccel
-      initParametersForward8Bit[nInitParametersForward8Bit];
+#define XDL_DECLARATIONS_GEN
+#include "mlir/Dialect/Rock/Tuning/QuickTuningPerfconfigs.inc"
+#undef XDL_DECLARATIONS_GEN
 
 public:
   std::vector<InitParamsAccel>
@@ -425,14 +416,9 @@ protected:
 //
 class PopulateParamsWmma : public PopulateParamsAccel {
 private:
-  static constexpr size_t nInitParametersFp16 = 30;
-  // Tuning parameters for fp16/bf16 convolutions.
-  static const InitParamsAccel initParametersFp16[nInitParametersFp16];
-
-  static constexpr size_t nInitParametersForward8Bit = 30;
-  // Tuning parameters for i8 convolutions.
-  static const InitParamsAccel
-      initParametersForward8Bit[nInitParametersForward8Bit];
+#define Wmma_DECLARATIONS_GEN
+#include "mlir/Dialect/Rock/Tuning/QuickTuningPerfconfigs.inc"
+#undef Wmma_DECLARATIONS_GEN
 
 public:
   std::vector<InitParamsAccel>

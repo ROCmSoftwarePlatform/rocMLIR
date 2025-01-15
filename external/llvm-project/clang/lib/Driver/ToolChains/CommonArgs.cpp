@@ -515,22 +515,6 @@ void tools::addLinkerCompressDebugSectionsOption(
   }
 }
 
-void tools::addGPULibraries(const ToolChain &TC, const llvm::opt::ArgList &Args,
-                            llvm::opt::ArgStringList &CmdArgs) {
-  if (Args.hasArg(options::OPT_nostdlib, options::OPT_r,
-                  options::OPT_nodefaultlibs, options::OPT_nolibc,
-                  options::OPT_nogpulibc))
-    return;
-
-  // If the user's toolchain has the 'include/<triple>/` path, we assume it
-  // supports the standard C libraries for the GPU and include them.
-  bool HasLibC = TC.getStdlibIncludePath().has_value();
-  if (HasLibC) {
-    CmdArgs.push_back("-lc");
-    CmdArgs.push_back("-lm");
-  }
-}
-
 void tools::AddTargetFeature(const ArgList &Args,
                              std::vector<StringRef> &Features,
                              OptSpecifier OnOpt, OptSpecifier OffOpt,
@@ -1201,29 +1185,6 @@ void tools::addLTOOptions(const ToolChain &ToolChain, const ArgList &Args,
         Args.MakeArgString(Twine(PluginOptPrefix) + "-implicit-mapsyms"));
 }
 
-std::string tools::FindDebugPerfInLibraryPath(const std::string &RLib) {
-  const char *DirList = ::getenv("LIBRARY_PATH");
-  if (!DirList)
-    return "";
-  StringRef Dirs(DirList);
-  if (Dirs.empty()) // Empty string should not add '.'.
-    return "";
-
-  StringRef::size_type Delim;
-  while ((Delim = Dirs.find(llvm::sys::EnvPathSeparator)) != StringRef::npos) {
-    if (Delim != 0) { // Leading colon.
-      if (Dirs.substr(0, Delim).ends_with(RLib))
-        return Dirs.substr(0, Delim).str();
-    }
-    Dirs = Dirs.substr(Delim + 1);
-  }
-  if (!Dirs.empty()) {
-    if (Dirs.ends_with(RLib))
-      return Dirs.str();
-  }
-  return "";
-}
-
 void tools::addOpenMPRuntimeSpecificRPath(const ToolChain &TC,
                                           const ArgList &Args,
                                           ArgStringList &CmdArgs) {
@@ -1239,9 +1200,17 @@ void tools::addOpenMPRuntimeSpecificRPath(const ToolChain &TC,
     if (TC.getSanitizerArgs(Args).needsAsanRt())
       LibSuffix.append("/asan");
   }
-  std::string CandidateRPath = FindDebugPerfInLibraryPath(LibSuffix);
-  if (CandidateRPath.empty())
-    CandidateRPath = D.Dir + "/../" + LibSuffix;
+
+  // Check if the device library can be found in
+  // one of the LIBRARY_PATH directories.
+  ArgStringList EnvLibraryPaths;
+  addDirectoryList(Args, EnvLibraryPaths, "", "LIBRARY_PATH");
+  for (auto &EnvLibraryPath : EnvLibraryPaths) {
+    if (llvm::sys::fs::exists(EnvLibraryPath)) {
+      CmdArgs.push_back("-rpath");
+      CmdArgs.push_back(Args.MakeArgString(EnvLibraryPath));
+    }
+  }
 
   if (Args.hasFlag(options::OPT_fopenmp_implicit_rpath,
                    options::OPT_fno_openmp_implicit_rpath, true)) {
@@ -1254,8 +1223,41 @@ void tools::addOpenMPRuntimeSpecificRPath(const ToolChain &TC,
       CmdArgs.push_back("-rpath");
       CmdArgs.push_back(Args.MakeArgString(TC.getCompilerRTPath()));
     }
+
+    // In case LibSuffix was not built, try lib
+    std::string CandidateRPath_suf = D.Dir + "/../" + LibSuffix;
     CmdArgs.push_back("-rpath");
-    CmdArgs.push_back(Args.MakeArgString(CandidateRPath.c_str()));
+    CmdArgs.push_back(Args.MakeArgString(CandidateRPath_suf.c_str()));
+
+    // Add lib directory in case LibSuffix does not exist
+    std::string CandidateRPath_lib = D.Dir + "/../lib";
+    if ((!llvm::sys::fs::exists(CandidateRPath_suf)) &&
+        (llvm::sys::fs::exists(CandidateRPath_lib))) {
+      CmdArgs.push_back("-rpath");
+      CmdArgs.push_back(Args.MakeArgString(CandidateRPath_lib.c_str()));
+    }
+
+    std::string rocmPath =
+        Args.getLastArgValue(clang::driver::options::OPT_rocm_path_EQ).str();
+    if (rocmPath.size() != 0) {
+      std::string rocmPath_lib = rocmPath + "/lib";
+      std::string rocmPath_suf = rocmPath + "/" + LibSuffix;
+      if (llvm::sys::fs::exists(rocmPath_suf)) {
+        CmdArgs.push_back("-rpath");
+        CmdArgs.push_back(Args.MakeArgString(rocmPath_suf.c_str()));
+      } else if (llvm::sys::fs::exists(rocmPath_lib)) {
+        CmdArgs.push_back("-rpath");
+        CmdArgs.push_back(Args.MakeArgString(rocmPath_lib.c_str()));
+      }
+    }
+
+    // Add Default lib path to ensure llvm dynamic library is picked up for
+    // lib-debug/lib-perf
+    if (LibSuffix != "lib" && llvm::sys::fs::exists(DefaultLibPath)) {
+      CmdArgs.push_back("-rpath");
+      CmdArgs.push_back(Args.MakeArgString(DefaultLibPath.c_str()));
+    }
+
     if (llvm::find_if(CmdArgs, [](StringRef str) {
           return !str.compare("--enable-new-dtags");
         }) == CmdArgs.end())
@@ -1436,6 +1438,17 @@ void tools::addFortranRuntimeLibs(const ToolChain &TC, const ArgList &Args,
     }
     CmdArgs.push_back("-lFortranRuntime");
     CmdArgs.push_back("-lFortranDecimal");
+    addArchSpecificRPath(TC, Args, CmdArgs);
+  }
+
+  // libomp needs libatomic for atomic operations if using libgcc
+  if (Args.hasFlag(options::OPT_fopenmp, options::OPT_fopenmp_EQ,
+                   options::OPT_fno_openmp, false)) {
+    Driver::OpenMPRuntimeKind OMPRuntime =
+        TC.getDriver().getOpenMPRuntime(Args);
+    ToolChain::RuntimeLibType RuntimeLib = TC.GetRuntimeLibType(Args);
+    if (OMPRuntime == Driver::OMPRT_OMP && RuntimeLib == ToolChain::RLT_Libgcc)
+      CmdArgs.push_back("-latomic");
   }
 }
 
@@ -1756,10 +1769,14 @@ bool tools::addSanitizerRuntimes(const ToolChain &TC, const ArgList &Args,
 }
 
 bool tools::addXRayRuntime(const ToolChain&TC, const ArgList &Args, ArgStringList &CmdArgs) {
-  if (Args.hasArg(options::OPT_shared))
-    return false;
-
-  if (TC.getXRayArgs().needsXRayRt()) {
+  if (Args.hasArg(options::OPT_shared)) {
+    if (TC.getXRayArgs().needsXRayDSORt()) {
+      CmdArgs.push_back("--whole-archive");
+      CmdArgs.push_back(TC.getCompilerRTArgString(Args, "xray-dso"));
+      CmdArgs.push_back("--no-whole-archive");
+      return true;
+    }
+  } else if (TC.getXRayArgs().needsXRayRt()) {
     CmdArgs.push_back("--whole-archive");
     CmdArgs.push_back(TC.getCompilerRTArgString(Args, "xray"));
     for (const auto &Mode : TC.getXRayArgs().modeList())
@@ -1891,18 +1908,13 @@ Arg *tools::getLastProfileUseArg(const ArgList &Args) {
 
 Arg *tools::getLastProfileSampleUseArg(const ArgList &Args) {
   auto *ProfileSampleUseArg = Args.getLastArg(
-      options::OPT_fprofile_sample_use, options::OPT_fprofile_sample_use_EQ,
-      options::OPT_fauto_profile, options::OPT_fauto_profile_EQ,
-      options::OPT_fno_profile_sample_use, options::OPT_fno_auto_profile);
+      options::OPT_fprofile_sample_use_EQ, options::OPT_fno_profile_sample_use);
 
-  if (ProfileSampleUseArg &&
-      (ProfileSampleUseArg->getOption().matches(
-           options::OPT_fno_profile_sample_use) ||
-       ProfileSampleUseArg->getOption().matches(options::OPT_fno_auto_profile)))
+  if (ProfileSampleUseArg && (ProfileSampleUseArg->getOption().matches(
+                                 options::OPT_fno_profile_sample_use)))
     return nullptr;
 
-  return Args.getLastArg(options::OPT_fprofile_sample_use_EQ,
-                         options::OPT_fauto_profile_EQ);
+  return Args.getLastArg(options::OPT_fprofile_sample_use_EQ);
 }
 
 const char *tools::RelocationModelName(llvm::Reloc::Model Model) {
@@ -2943,6 +2955,25 @@ void tools::addMachineOutlinerArgs(const Driver &D,
       addArg(Twine("-enable-machine-outliner=never"));
     }
   }
+
+  auto *CodeGenDataGenArg =
+      Args.getLastArg(options::OPT_fcodegen_data_generate_EQ);
+  auto *CodeGenDataUseArg = Args.getLastArg(options::OPT_fcodegen_data_use_EQ);
+
+  // We only allow one of them to be specified.
+  if (CodeGenDataGenArg && CodeGenDataUseArg)
+    D.Diag(diag::err_drv_argument_not_allowed_with)
+        << CodeGenDataGenArg->getAsString(Args)
+        << CodeGenDataUseArg->getAsString(Args);
+
+  // For codegen data gen, the output file is passed to the linker
+  // while a boolean flag is passed to the LLVM backend.
+  if (CodeGenDataGenArg)
+    addArg(Twine("-codegen-data-generate"));
+
+  // For codegen data use, the input file is passed to the LLVM backend.
+  if (CodeGenDataUseArg)
+    addArg(Twine("-codegen-data-use-path=") + CodeGenDataUseArg->getValue());
 }
 
 void tools::addOpenMPDeviceRTL(const Driver &D,
@@ -3147,5 +3178,97 @@ void tools::addMCModel(const Driver &D, const llvm::opt::ArgList &Args,
     } else if (IsLargeCM) {
       CmdArgs.push_back("-mlarge-data-threshold=0");
     }
+  }
+}
+
+void tools::handleColorDiagnosticsArgs(const Driver &D, const ArgList &Args,
+                                       ArgStringList &CmdArgs) {
+  // Color diagnostics are parsed by the driver directly from argv and later
+  // re-parsed to construct this job; claim any possible color diagnostic here
+  // to avoid warn_drv_unused_argument and diagnose bad
+  // OPT_fdiagnostics_color_EQ values.
+  Args.getLastArg(options::OPT_fcolor_diagnostics,
+                  options::OPT_fno_color_diagnostics);
+  if (const Arg *A = Args.getLastArg(options::OPT_fdiagnostics_color_EQ)) {
+    StringRef Value(A->getValue());
+    if (Value != "always" && Value != "never" && Value != "auto")
+      D.Diag(diag::err_drv_invalid_argument_to_option)
+          << Value << A->getOption().getName();
+  }
+
+  if (D.getDiags().getDiagnosticOptions().ShowColors)
+    CmdArgs.push_back("-fcolor-diagnostics");
+}
+
+void tools::escapeSpacesAndBackslashes(const char *Arg,
+                                       llvm::SmallVectorImpl<char> &Res) {
+  for (; *Arg; ++Arg) {
+    switch (*Arg) {
+    default:
+      break;
+    case ' ':
+    case '\\':
+      Res.push_back('\\');
+      break;
+    }
+    Res.push_back(*Arg);
+  }
+}
+
+const char *tools::renderEscapedCommandLine(const ToolChain &TC,
+                                            const llvm::opt::ArgList &Args) {
+  const Driver &D = TC.getDriver();
+  const char *Exec = D.getClangProgramPath();
+
+  llvm::opt::ArgStringList OriginalArgs;
+  for (const auto &Arg : Args)
+    Arg->render(Args, OriginalArgs);
+
+  llvm::SmallString<256> Flags;
+  escapeSpacesAndBackslashes(Exec, Flags);
+  for (const char *OriginalArg : OriginalArgs) {
+    llvm::SmallString<128> EscapedArg;
+    escapeSpacesAndBackslashes(OriginalArg, EscapedArg);
+    Flags += " ";
+    Flags += EscapedArg;
+  }
+
+  return Args.MakeArgString(Flags);
+}
+
+bool tools::shouldRecordCommandLine(const ToolChain &TC,
+                                    const llvm::opt::ArgList &Args,
+                                    bool &FRecordCommandLine,
+                                    bool &GRecordCommandLine) {
+  const Driver &D = TC.getDriver();
+  const llvm::Triple &Triple = TC.getEffectiveTriple();
+  const std::string &TripleStr = Triple.getTriple();
+
+  FRecordCommandLine =
+      Args.hasFlag(options::OPT_frecord_command_line,
+                   options::OPT_fno_record_command_line, false);
+  GRecordCommandLine =
+      Args.hasFlag(options::OPT_grecord_command_line,
+                   options::OPT_gno_record_command_line, false);
+  if (FRecordCommandLine && !Triple.isOSBinFormatELF() &&
+      !Triple.isOSBinFormatXCOFF() && !Triple.isOSBinFormatMachO())
+    D.Diag(diag::err_drv_unsupported_opt_for_target)
+        << Args.getLastArg(options::OPT_frecord_command_line)->getAsString(Args)
+        << TripleStr;
+
+  return FRecordCommandLine || TC.UseDwarfDebugFlags() || GRecordCommandLine;
+}
+
+void tools::renderCommonIntegerOverflowOptions(const ArgList &Args,
+                                               ArgStringList &CmdArgs) {
+  // -fno-strict-overflow implies -fwrapv if it isn't disabled, but
+  // -fstrict-overflow won't turn off an explicitly enabled -fwrapv.
+  if (Arg *A = Args.getLastArg(options::OPT_fwrapv, options::OPT_fno_wrapv)) {
+    if (A->getOption().matches(options::OPT_fwrapv))
+      CmdArgs.push_back("-fwrapv");
+  } else if (Arg *A = Args.getLastArg(options::OPT_fstrict_overflow,
+                                      options::OPT_fno_strict_overflow)) {
+    if (A->getOption().matches(options::OPT_fno_strict_overflow))
+      CmdArgs.push_back("-fwrapv");
   }
 }

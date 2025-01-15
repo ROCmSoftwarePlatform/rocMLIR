@@ -516,7 +516,7 @@ def Rock_FillOp:
     Rock_Op<"fill">,
     Arguments<(ins AnyMemRef:$input,
                    //AnyTypeOf<[AnyInteger, AnyFloat]>:$value)> {
-                   AnyTypeOf<[AnyInteger, AnyFloat, AnyVector]>:$value)> {
+                   AnyTypeOf<[AnyInteger, AnyFloat, AnyVectorOfNonZeroRank]>:$value)> {
   let summary = "Fill memory with constant value on GPU";
   let description = [{
     The `rock.fill` op fills a memref on GPU with a constant value.
@@ -529,7 +529,7 @@ def Rock_FillOp:
 def Rock_BlockwiseFillOp:
     Rock_Op<"blockwise_fill", [AllElementTypesMatch<["memref", "value"]>]>,
     Arguments<(ins AnyMemRef:$memref,
-                   AnyTypeOf<[AnyInteger, AnyFloat, AnyVector]>:$value,
+                   AnyTypeOf<[AnyInteger, AnyFloat, AnyVectorOfNonZeroRank]>:$value,
                    I32Attr:$blockSize)> {
   let summary = "Fill memory with constant value on GPU";
   let description = [{
@@ -1011,13 +1011,13 @@ def Rock_ThreadwiseReadIntoOp :
       }]>]>,
     Arguments<(ins Arg<MemRefOf<NativeMemoryOpTypes>, "source view", [MemRead]>:$source,
       Arg<MemRefOf<NativeMemoryOpTypes>, "destination registers", [MemWrite]>:$dest,
-      Variadic<VectorOf<[I1]>>:$dynamicValidities,
+      Variadic<VectorOfNonZeroRankOf<[I1]>>:$dynamicValidities,
       TransformMapArrayAttr:$extraViews,
       Variadic<Index>:$extraIndices,
       UnitAttr:$forceUnroll,
       UnitAttr:$useIndexDiffs
     )>,
-    Results<(outs Optional<VectorOf<[I1]>>:$validityRecord)> {
+    Results<(outs Optional<VectorOfNonZeroRankOf<[I1]>>:$validityRecord)> {
   let summary = "Read values from transformed source into destination";
 
   let description = [{

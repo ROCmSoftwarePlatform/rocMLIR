@@ -88,7 +88,6 @@ class HipBinUtil {
   }
   virtual ~HipBinUtil();
   // Common helper functions
-  vector<string> splitStr(string fullStr, char delimiter) const;
   string replaceStr(const string& s, const string& toReplace,
                     const string& replaceWith) const;
   string replaceRegex(const string& s, regex toReplace,
@@ -97,7 +96,6 @@ class HipBinUtil {
   string getTempDir();
   void deleteTempFiles();
   string mktempFile(string name);
-  string trim(string str) const;
   string readConfigMap(map<string, string> hipVersionMap,
                        string keyName, string defaultValue) const;
   map<string, string> parseConfigFile(fs::path configPath) const;
@@ -130,13 +128,6 @@ string HipBinUtil::mktempFile(string name) {
   return fileName;
 }
 
-// removes the empty spaces and end lines
-string HipBinUtil::trim(string str) const {
-  string strChomp = str;
-  strChomp.erase(str.find_last_not_of(" \n\r\t")+1);
-  return strChomp;
-}
-
 // matches the pattern in the string
 bool HipBinUtil::stringRegexMatch(string fullString, string pattern) const {
   return regex_match(fullString, regex(pattern));
@@ -145,17 +136,6 @@ bool HipBinUtil::stringRegexMatch(string fullString, string pattern) const {
 // subtring is present in string
 bool HipBinUtil::substringPresent(string fullString, string subString) const {
   return fullString.find(subString) != string::npos;
-}
-
-// splits the string with the delimiter
-vector<string> HipBinUtil::splitStr(string fullStr, char delimiter) const {
-  vector <string> tokens;
-  stringstream check1(fullStr);
-  string intermediate;
-  while (getline(check1, intermediate, delimiter)) {
-    tokens.push_back(intermediate);
-  }
-  return tokens;
 }
 
 // replaces the toReplace string with replaceWith string. Returns the new string

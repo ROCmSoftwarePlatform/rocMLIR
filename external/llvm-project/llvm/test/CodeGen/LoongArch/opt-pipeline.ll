@@ -29,6 +29,7 @@
 ; LAXX-NEXT: Default Regalloc Eviction Advisor
 ; LAXX-NEXT: Default Regalloc Priority Advisor
 ; LAXX-NEXT:   ModulePass Manager
+; LAXX-NEXT:     Verify Heterogeneous Debug Preconditions
 ; LAXX-NEXT:     Pre-ISel Intrinsic Lowering
 ; LAXX-NEXT:     FunctionPass Manager
 ; LAXX-NEXT:       Expand large div/rem
@@ -65,7 +66,6 @@
 ; LAXX-NEXT:       Scalarize Masked Memory Intrinsics
 ; LAXX-NEXT:       Expand reduction intrinsics
 ; LAXX-NEXT:       Natural Loop Information
-; LAXX-NEXT:       TLS Variable Hoist
 ; LAXX-NEXT:       Type Promotion
 ; LAXX-NEXT:       CodeGen Prepare
 ; LAXX-NEXT:       Dominator Tree Construction

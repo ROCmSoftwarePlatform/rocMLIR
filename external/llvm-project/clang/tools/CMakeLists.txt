@@ -14,6 +14,7 @@ add_clang_subdirectory(clang-offload-packager)
 add_clang_subdirectory(clang-offload-bundler)
 add_clang_subdirectory(clang-offload-wrapper)
 add_clang_subdirectory(clang-scan-deps)
+add_clang_subdirectory(clang-sycl-linker)
 add_clang_subdirectory(clang-installapi)
 if(HAVE_CLANG_REPL_SUPPORT)
   add_clang_subdirectory(clang-repl)
@@ -22,11 +23,10 @@ add_clang_subdirectory(clang-hip)
 
 add_clang_subdirectory(c-index-test)
 
-add_clang_subdirectory(clang-rename)
 add_clang_subdirectory(clang-refactor)
 # For MinGW we only enable shared library if LLVM_LINK_LLVM_DYLIB=ON.
 # Without that option resulting library is too close to 2^16 DLL exports limit.
-if(UNIX OR (MINGW AND LLVM_LINK_LLVM_DYLIB))
+if(UNIX OR (MSVC AND LLVM_BUILD_LLVM_DYLIB_VIS) OR (MINGW AND LLVM_LINK_LLVM_DYLIB))
   add_clang_subdirectory(clang-shlib)
 endif()
 

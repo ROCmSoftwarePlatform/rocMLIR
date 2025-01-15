@@ -223,10 +223,16 @@ extern "C" {
 #define AMD_COMGR_VERSION_2_7
 
 /**
- * The function was introduced or changed in version 2.7 of the interface
- * and has the symbol version string of ``"@amd_comgr_NAME@_2.7"``.
+ * The function was introduced or changed in version 2.8 of the interface
+ * and has the symbol version string of ``"@amd_comgr_NAME@_2.8"``.
  */
 #define AMD_COMGR_VERSION_2_8
+
+/**
+ * The function was introduced or changed in version 2.9 of the interface
+ * and has the symbol version string of ``"@amd_comgr_NAME@_2.9"``.
+ */
+#define AMD_COMGR_VERSION_2_9
 
 /** @} */
 
@@ -272,17 +278,13 @@ typedef enum amd_comgr_language_s {
    */
   AMD_COMGR_LANGUAGE_OPENCL_2_0 = 0x2,
   /**
-   * AMD Hetrogeneous C++ (HC).
-   */
-  AMD_COMGR_LANGUAGE_HC = 0x3,
-  /**
    * HIP.
    */
-  AMD_COMGR_LANGUAGE_HIP = 0x4,
+  AMD_COMGR_LANGUAGE_HIP = 0x3,
   /**
    * LLVM IR, either textual (.ll) or bitcode (.bc) format.
    */
-  AMD_COMGR_LANGUAGE_LLVM_IR = 0x5,
+  AMD_COMGR_LANGUAGE_LLVM_IR = 0x4,
   /**
    * Marker for last valid language.
    */
@@ -1228,91 +1230,10 @@ amd_comgr_action_info_get_language(
   amd_comgr_language_t *language) AMD_COMGR_VERSION_1_8;
 
 /**
- * @brief Set the options string of an action info object.
- *
- * When an action info object is created it has an empty options string.
- *
- * This overrides any option strings or arrays previously set by calls to this
- * function or @p amd_comgr_action_info_set_option_list.
- *
- * An @p action_info object which had its options set with this function can
- * only have its option inspected with @p amd_comgr_action_info_get_options.
- *
- * @param[in] action_info A handle to the action info object to be
- * updated.
- *
- * @param[in] options A null terminated string that is the options. If
- * NULL or the empty string then the options are cleared.
- *
- * @retval ::AMD_COMGR_STATUS_SUCCESS The function has
- * been executed successfully.
- *
- * @retval ::AMD_COMGR_STATUS_ERROR_INVALID_ARGUMENT @p
- * action_info is an invalid action info object.
- *
- * @retval ::AMD_COMGR_STATUS_ERROR_OUT_OF_RESOURCES
- * Unable to update action info object as out of resources.
- *
- * @deprecated since 1.3
- * @see amd_comgr_action_info_set_option_list
- */
-AMD_COMGR_DEPRECATED("Will be removed in Comgr v3.0 (Rocm v6.0). Use "
-                     "amd_comgr_action_info_set_option_list() instead")
-amd_comgr_status_t AMD_COMGR_API
-amd_comgr_action_info_set_options(
-  amd_comgr_action_info_t action_info,
-  const char *options) AMD_COMGR_VERSION_1_8;
-
-/**
- * @brief Get the options string and/or options strings length of an action
- * info object.
- *
- * The @p action_info object must have had its options set with @p
- * amd_comgr_action_info_set_options.
- *
- * @param[in] action_info The action info object to query.
- *
- * @param[in, out] size On entry, the size of @p options. On return, if @p
- * options is NULL, set to the size of the options including the terminating
- * null character.
- *
- * @param[out] options If not NULL, then the first @p size characters of
- * the options are copied. If the options are not set then an empty
- * string is copied. If NULL, options is not copied, and only @p size
- * is updated (useful inorder to find the size of buffer required to
- * copy the options).
- *
- * @retval ::AMD_COMGR_STATUS_SUCCESS The function has
- * been executed successfully.
- *
- * @retval ::AMD_COMGR_STATUS_ERROR The options of @p action_info were not set
- * with @p amd_comgr_action_info_set_options.
- *
- * @retval ::AMD_COMGR_STATUS_ERROR_INVALID_ARGUMENT @p
- * action_info is an invalid action info object. @p size is NULL.
- *
- * @retval ::AMD_COMGR_STATUS_ERROR_OUT_OF_RESOURCES
- * Unable to update the data object as out of resources.
- *
- * @deprecated since 1.3
- * @see amd_comgr_action_info_get_option_list_count and
- * amd_comgr_action_info_get_option_list_item
- */
-AMD_COMGR_DEPRECATED("Will be removed in Comgr v3.0 (Rocm v6.0). Use "
-                     "amd_comgr_action_info_get_option_list_count() "
-                     "and amd_comgr_action_info_get_option_list_item() "
-                     "instead")
-amd_comgr_status_t AMD_COMGR_API
-amd_comgr_action_info_get_options(
-  amd_comgr_action_info_t action_info,
-  size_t *size,
-  char *options) AMD_COMGR_VERSION_1_8;
-
-/**
  * @brief Set the options array of an action info object.
  *
  * This overrides any option strings or arrays previously set by calls to this
- * function or @p amd_comgr_action_info_set_options.
+ * function.
  *
  * An @p action_info object which had its options set with this function can
  * only have its option inspected with @p
@@ -1379,7 +1300,7 @@ amd_comgr_action_info_get_option_list_count(
  *
  * @param[in] index The index of the option to be returned. The first option
  * index is 0. The order is the same as the options when they were added in @p
- * amd_comgr_action_info_set_options.
+ * amd_comgr_action_info_set_option_list.
  *
  * @param[in, out] size On entry, the size of @p option. On return, if @option
  * is NULL, set to the size of the Nth option string including the terminating
@@ -1495,6 +1416,29 @@ amd_comgr_action_info_get_bundle_entry_id(
   size_t index,
   size_t *size,
   char *bundle_entry_id) AMD_COMGR_VERSION_2_8;
+
+/**
+ * @brief Set the device library linking behavior of an action info object.
+ *
+ * Device library linking can be either enforced or omitted for compilation
+ * actions.
+ *
+ * @param[in] action_info A handle to the action info object to be
+ * updated.
+ *
+ * @param[in] should_link_device_libs A boolean that directs the choice to
+ * link the device libraries.
+ *
+ * @retval ::AMD_COMGR_STATUS_SUCCESS The function has
+ * been executed successfully.
+ *
+ * @retval ::AMD_COMGR_STATUS_ERROR_INVALID_ARGUMENT @p
+ * action_info is an invalid action info object.
+ */
+amd_comgr_status_t AMD_COMGR_API
+amd_comgr_action_info_set_device_lib_linking(
+  amd_comgr_action_info_t action_info,
+  bool should_link_device_libs) AMD_COMGR_VERSION_2_9;
 
 /**
  * @brief Set the working directory of an action info object.
@@ -1645,44 +1589,6 @@ typedef enum amd_comgr_action_kind_s {
    */
   AMD_COMGR_ACTION_COMPILE_SOURCE_TO_BC = 0x2,
   /**
-   * Copy all existing data objects in @p input to @p output, then add the
-   * device-specific and language-specific bitcode libraries required for
-   * compilation.
-   *
-   * Currently the only supported languages are @p AMD_COMGR_LANGUAGE_OPENCL_1_2,
-   * @p AMD_COMGR_LANGUAGE_OPENCL_2_0, and @p AMD_COMGR_LANGUAGE_HIP.
-   *
-   * The options in @p info should be set to a set of language-specific flags.
-   * For OpenCL and HIP these include:
-   *
-   *    correctly_rounded_sqrt
-   *    finite_only
-   *    unsafe_math
-   *    wavefrontsize64
-   *
-   * For example, to enable finite_only unsafe_math, the options should be set
-   * as:
-   *
-   *    const char *options[] = {"finite_only", "unsafe_math"};
-   *    size_t optionsCount = sizeof(options) / sizeof(options[0]);
-   *    amd_comgr_action_info_set_option_list(info, options, optionsCount);
-   *
-   * Return @p AMD_COMGR_STATUS_ERROR_INVALID_ARGUMENT if isa name or language
-   * is not set in @p info, the language is not supported, an unknown
-   * language-specific flag is supplied, or a language-specific flag is
-   * repeated.
-   *
-   * @deprecated since 1.7
-   * @warning This action, followed by @c AMD_COMGR_ACTION_LINK_BC_TO_BC, may
-   * result in subtle bugs due to incorrect linking of the device libraries.
-   * The @c AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC action can
-   * be used as a workaround which ensures the link occurs correctly.
-   */
-  AMD_COMGR_ACTION_ADD_DEVICE_LIBRARIES
-  AMD_COMGR_DEPRECATED("Will be removed in Comgr v3.0 (Rocm v6.0). Use "
-                       "AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC "
-                       "instead") = 0x3,
-  /**
    * Link a collection of bitcodes, bundled bitcodes, and bundled bitcode
    * archives in @p into a single composite (unbundled) bitcode @p.
    * Any device library bc data object must be explicitly added to @p input if
@@ -1695,18 +1601,7 @@ typedef enum amd_comgr_action_kind_s {
    * of all bc data objects in @p input, or if the Name field is not set for
    * any DataObject in the input set.
    */
-  AMD_COMGR_ACTION_LINK_BC_TO_BC = 0x4,
-  /**
-   * Optimize each bc data object in @p input and create an optimized bc data
-   * object to @p result.
-   *
-   * Return @p AMD_COMGR_STATUS_ERROR if the optimization fails.
-   *
-   * Return @p AMD_COMGR_STATUS_ERROR_INVALID_ARGUMENT
-   * if isa name is not set in @p info and does not match the isa name
-   * of all bc data objects in @p input.
-   */
-  AMD_COMGR_ACTION_OPTIMIZE_BC_TO_BC = 0x5,
+  AMD_COMGR_ACTION_LINK_BC_TO_BC = 0x3,
   /**
    * Perform code generation for each bc data object in @p input in
    * order. For each successful code generation add a relocatable data
@@ -1719,7 +1614,7 @@ typedef enum amd_comgr_action_kind_s {
    * if isa name is not set in @p info and does not match the isa name
    * of all bc data objects in @p input.
    */
-  AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE = 0x6,
+  AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE = 0x4,
   /**
    * Perform code generation for each bc data object in @p input in
    * order. For each successful code generation add an assembly source data
@@ -1732,7 +1627,7 @@ typedef enum amd_comgr_action_kind_s {
    * if isa name is not set in @p info and does not match the isa name
    * of all bc data objects in @p input.
    */
-  AMD_COMGR_ACTION_CODEGEN_BC_TO_ASSEMBLY = 0x7,
+  AMD_COMGR_ACTION_CODEGEN_BC_TO_ASSEMBLY = 0x5,
   /**
    * Link each relocatable data object in @p input together and add
    * the linked relocatable data object to @p result. Any device
@@ -1745,7 +1640,7 @@ typedef enum amd_comgr_action_kind_s {
    * if isa name is not set in @p info and does not match the isa name
    * of all relocatable data objects in @p input.
    */
-  AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_RELOCATABLE = 0x8,
+  AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_RELOCATABLE = 0x6,
   /**
    * Link each relocatable data object in @p input together and add
    * the linked executable data object to @p result. Any device
@@ -1758,7 +1653,7 @@ typedef enum amd_comgr_action_kind_s {
    * if isa name is not set in @p info and does not match the isa name
    * of all relocatable data objects in @p input.
    */
-  AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE = 0x9,
+  AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE = 0x7,
   /**
    * Assemble each source data object in @p input in order into machine code.
    * For each successful assembly add a relocatable data object to @p result.
@@ -1771,7 +1666,7 @@ typedef enum amd_comgr_action_kind_s {
    * Return @p AMD_COMGR_STATUS_ERROR_INVALID_ARGUMENT if isa name is not set in
    * @p info.
    */
-  AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE = 0xA,
+  AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE = 0x8,
   /**
    * Disassemble each relocatable data object in @p input in
    * order. For each successful disassembly add a source data object to
@@ -1784,7 +1679,7 @@ typedef enum amd_comgr_action_kind_s {
    * if isa name is not set in @p info and does not match the isa name
    * of all relocatable data objects in @p input.
    */
-  AMD_COMGR_ACTION_DISASSEMBLE_RELOCATABLE_TO_SOURCE = 0xB,
+  AMD_COMGR_ACTION_DISASSEMBLE_RELOCATABLE_TO_SOURCE = 0x9,
   /**
    * Disassemble each executable data object in @p input in order. For
    * each successful disassembly add a source data object to @p result.
@@ -1796,7 +1691,7 @@ typedef enum amd_comgr_action_kind_s {
    * if isa name is not set in @p info and does not match the isa name
    * of all relocatable data objects in @p input.
    */
-  AMD_COMGR_ACTION_DISASSEMBLE_EXECUTABLE_TO_SOURCE = 0xC,
+  AMD_COMGR_ACTION_DISASSEMBLE_EXECUTABLE_TO_SOURCE = 0xA,
   /**
    * Disassemble each bytes data object in @p input in order. For each
    * successful disassembly add a source data object to @p
@@ -1811,29 +1706,7 @@ typedef enum amd_comgr_action_kind_s {
    * Return @p AMD_COMGR_STATUS_ERROR_INVALID_ARGUMENT
    * if isa name is not set in @p info
    */
-  AMD_COMGR_ACTION_DISASSEMBLE_BYTES_TO_SOURCE = 0xD,
-  /**
-   * Compile each source data object in @p input in order. For each
-   * successful compilation add a fat binary to @p result. Resolve
-   * any include source names using the names of include data objects
-   * in @p input. Resolve any include relative path names using the
-   * working directory path in @p info. Produce fat binary for isa name in @p
-   * info. Compile the source for the language in @p info.
-   *
-   * Return @p AMD_COMGR_STATUS_ERROR if any compilation
-   * fails.
-   *
-   * Return @p AMD_COMGR_STATUS_ERROR_INVALID_ARGUMENT
-   * if isa name or language is not set in @p info.
-   *
-   * @deprecated since 2.5
-   * @see in-process compilation via AMD_COMGR_ACTION_COMPILE_SOURCE_TO_BC, etc.
-   * insteaad
-   */
-  AMD_COMGR_ACTION_COMPILE_SOURCE_TO_FATBIN
-  AMD_COMGR_DEPRECATED("Will be removed in Comgr v3.0 (Rocm v6.0). Use "
-                       "AMD_COMGR_ACTION_COMPILE_SOURCE_TO_BC, etc. "
-                       "instead") = 0xE,
+  AMD_COMGR_ACTION_DISASSEMBLE_BYTES_TO_SOURCE = 0xB,
   /**
    * Compile each source data object in @p input in order. For each
    * successful compilation add a bc data object to @p result. Resolve
@@ -1850,7 +1723,7 @@ typedef enum amd_comgr_action_kind_s {
    * Return @p AMD_COMGR_STATUS_ERROR_INVALID_ARGUMENT
    * if isa name or language is not set in @p info.
    */
-  AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC = 0xF,
+  AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC = 0xC,
   /**
    * Compile a single source data object in @p input in order. For each
    * successful compilation add a relocatable data object to @p result.
@@ -1867,7 +1740,7 @@ typedef enum amd_comgr_action_kind_s {
    * Return @p AMD_COMGR_STATUS_ERROR_INVALID_ARGUMENT
    * if isa name or language is not set in @p info.
    */
-  AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE = 0x10,
+  AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE = 0xD,
   /**
    * Compile each source data object in @p input and create a single executabele
    * in @p result. Resolve any include source names using the names of include
@@ -1883,7 +1756,7 @@ typedef enum amd_comgr_action_kind_s {
    * Return @p AMD_COMGR_STATUS_ERROR_INVALID_ARGUMENT
    * if isa name or language is not set in @p info.
    */
-  AMD_COMGR_ACTION_COMPILE_SOURCE_TO_EXECUTABLE = 0x11,
+  AMD_COMGR_ACTION_COMPILE_SOURCE_TO_EXECUTABLE = 0xE,
 
    /**
    * Unbundle each source data object in @p input. These objects can be
@@ -1897,7 +1770,7 @@ typedef enum amd_comgr_action_kind_s {
    * Return @p AMD_COMGR_STATUS_ERROR_INVALID_ARGUMENT
    * if isa name or language is not set in @p info.
    */
-  AMD_COMGR_ACTION_UNBUNDLE = 0x12,
+  AMD_COMGR_ACTION_UNBUNDLE = 0xF,
 
   /**
    * Marker for last valid action kind.

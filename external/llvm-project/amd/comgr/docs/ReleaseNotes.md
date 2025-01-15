@@ -25,6 +25,19 @@ device library from v4 to v5
 (libamd\_comgr.dll -> libamd\_comgr\_X.dll, where X is the major version)
 - oclc\_daz\_opt\_on.bc and oclc\_daz\_opt\_off.bc, and the corresponding
   variable \_\_oclc\_daz\_opt are no longer necessary.
+- Updated default device library linking behavior for several actions.
+  Previously, linking was done for some actions and not others, and not
+  controllable by the user. Now, linking is not done by default, but can
+  optionally be enabled via the
+  amd\_comgr\_action\_info\_set\_device\_lib\_linking() API. Users relying
+  on enabled-by-default behavior should update to use the new API to avoid
+  changes in behavior.
+
+  Note: This does not apply to the \*COMPILE\_SOURCE\_WITH\_DEVICE\_LIBS\_TO\_BC
+  action. This action is not affected by the
+  amd\_comgr\_action\_info\_set\_device\_lib\_linking() API. The new API will
+  allow us to deprecate and remove this action in favor of the
+  \*COMPILE\_SOURCE\_TO\_BC action.
 
 New Features
 ------------
@@ -98,10 +111,14 @@ New APIs
     - For a given executable and ELF virtual address, return a code object
     offset. This API will benifet the ROCm debugger and profilier
 - amd\_comgr\_action\_info\_set\_bundle\_entry\_ids() (v2.8)
-- amd\_comgr\_action\_info\_get\_bundle\_entry\_id_count() (v2.8)
+- amd\_comgr\_action\_info\_get\_bundle\_entry\_id\_count() (v2.8)
 - amd\_comgr\_action\_info\_get\_bundle\_entry\_id() (v2.8)
     - A user can provide a set of bundle entry IDs, which are processed when
     calling the AMD\_COMGR\_UNBUNDLE action
+- amd\_comgr\_action\_info\_set\_device\_lib\_linking() (v2.9)
+    - By setting this ActionInfo property, a user can explicitly dictate if
+    device libraries should be linked for a given action. (Previouly, the
+    action type implicitly determined device library linking).
 
 
 Deprecated APIs
@@ -109,6 +126,11 @@ Deprecated APIs
 
 Removed APIs
 ------------
+- amd\_comgr\_action\_info\_set\_options() (v3.0)
+- amd\_comgr\_action\_info\_get\_options() (v3.0)
+  - Use  amd\_comgr\_action\_info\_set\_option\_list(),
+    amd\_comgr\_action\_info\_get\_option\_list\_count(), and
+    amd\_comgr\_action\_info\_get\_option\_list\_item() instead
 
 New Comgr Actions and Data Types
 --------------------------------
@@ -141,6 +163,16 @@ Deprecated Comgr Actions and Data Types
 
 Removed Comgr Actions and Data Types
 ------------------------------------
+- (Action) AMD\_COMGR\_ACTION\_COMPILE\_SOURCE\_TO\_FATBIN
+  - This workaround has been removed in favor of
+  \*\_COMPILE\_SOURCE\_(WITH\_DEVICE\_LIBS\_)TO\_BC
+- (Action) AMD\_COMGR\_ACTION\_OPTIMIZE\_BC\_TO\_BC
+  - This is a legacy action that was never implemented
+- (Language) AMD\_COMGR\_LANGUAGE\_HC
+  - This is a legacy language that was never used
+- (Action) AMD\_COMGR\_ACTION\_ADD\_DEVICE\_LIBRARIES
+  - This has been replaced with
+  AMD\_COMGR\_ACTION\_COMPILE\_SOURCE\_WITH\_DEVICE\_LIBS\_TO\_BC
 
 Comgr Testing, Debugging, and Logging Updates
 ---------------------------------------------
@@ -170,6 +202,13 @@ where reporters provide Comgr logs.
 - Refactor nested kernel behavior into new test, as this behavior is less common
 and shouldn't be featured in the baseline tests
 - Add metadata parsing tests for code objects with multiple AMDGPU metadata note entries.
+- Updated Comgr HIP test to not rely on HIP\_COMPILER being set, or a valid HIP
+installation. We can test the functionality of Comgr HIP compilation without
+directly relying on HIP
+- Added framework for Comgr lit tests. These tests will allow us to easily
+validate generated artifacts with command-line tools like llvm-dis,
+llvm-objdump, etc. Moving forward, most new Comgr tests should be written as
+lit tests, and tests in comgr/test should be transitioned to comgr/test-lit.
 
 New Targets
 -----------
@@ -181,6 +220,7 @@ New Targets
  - gfx1151
  - gfx1152
  - gfx9-generic
+ - gfx9-4-generic
  - gfx10-1-generic
  - gfx10-3-generic
  - gfx11-generic
