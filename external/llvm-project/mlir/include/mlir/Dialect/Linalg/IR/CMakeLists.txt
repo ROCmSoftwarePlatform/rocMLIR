@@ -3,8 +3,6 @@ function(add_linalg_ods_yaml_gen yaml_ast_file output_file)
   set(YAML_AST_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/${yaml_ast_file})
   set(GEN_ODS_FILE ${CMAKE_CURRENT_BINARY_DIR}/${output_file}.yamlgen.td)
   set(GEN_CPP_FILE ${CMAKE_CURRENT_BINARY_DIR}/${output_file}.yamlgen.cpp.inc)
-  # Note: workaround for https://github.com/ROCm/rocMLIR-internal/issues/524
-  set(DUMMY_FILE ${CMAKE_CURRENT_BINARY_DIR}/dummy)
   set_source_files_properties(
     ${GEN_ODS_FILE}
     PROPERTIES GENERATED TRUE)
@@ -18,12 +16,6 @@ function(add_linalg_ods_yaml_gen yaml_ast_file output_file)
     ${YAML_AST_SOURCE}
     DEPENDS
     ${MLIR_LINALG_ODS_YAML_GEN_TARGET})
-  add_custom_command(
-    OUTPUT ${DUMMY_FILE}
-    COMMAND ${CMAKE_COMMAND} -E touch ${DUMMY_FILE}
-    DEPENDS
-    ${GEN_ODS_FILE} ${GEN_CPP_FILE}
-  )
   add_custom_target(
     MLIR${output_file}YamlIncGen
     DEPENDS
