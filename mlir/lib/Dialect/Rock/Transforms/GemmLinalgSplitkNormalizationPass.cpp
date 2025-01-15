@@ -20,34 +20,14 @@
 //
 //===-----------------------------------------------------===//
 #include "mlir/Analysis/BufferDependencyAnalysis.h"
-#include "mlir/Dialect/Arith/IR/Arith.h"
-#include "mlir/Dialect/MHAL/IR/MHAL.h"
-#include "mlir/Dialect/Rock/IR/GemmSize.h"
-#include "mlir/Dialect/Rock/IR/Rock.h"
 #include "mlir/Dialect/Rock/utility/fusionUtils.h"
-#include "mlir/Dialect/Rock/IR/RockTypes.h"
-#include "mlir/Dialect/Rock/IR/TransformMapBuilder.h"
-#include "mlir/Dialect/Rock/Passes.h"
-#include "mlir/Dialect/Rock/Tuning/GridwiseGemmParams.h"
-#include "mlir/Dialect/Rock/utility/AmdArchDb.h"
 #include "mlir/Dialect/Rock/utility/builderUtils.h"
 #include "mlir/Dialect/Rock/utility/loweringUtils.h"
-#include "mlir/Dialect/Rock/utility/math.h"
-
-#include "mlir/Dialect/Linalg/IR/Linalg.h"
-#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Rock/utility/transformMapUtils.h"
-#include "mlir/IR/BuiltinTypes.h"
-#include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"
-#include "mlir/Support/LogicalResult.h"
-#include "mlir/Transforms/DialectConversion.h"
-#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 #include "llvm/Support/Debug.h"
-#include <algorithm>
-#include <memory>
-#include <sstream>
+#include "llvm/Support/LogicalResult.h"
 
 namespace mlir {
 namespace rock {
@@ -103,18 +83,21 @@ static LogicalResult rewriteLinalgForSplitK(func::FuncOp &func, BufferDependency
   SmallVector<linalg::GenericOp> genericOps;
   func.walk([&genericOps](linalg::GenericOp genericOp) {genericOps.push_back(genericOp);});
   const auto &writersTable = bufferDeps.getWritersTable();
+  LLVM_DEBUG(llvm::dbgs() << "Found "<<genericOps.size()<<" linalg::GenericOp\n");
 
   for(linalg::GenericOp op : genericOps) {
-    SmallVector<Value> operands;
+    SmallVector<Value> gemmOut;
     SmallVector<int64_t> splitKFactors;
     for(auto operand : op->getOperands()) {
-      if(auto alloc = operand.getDefiningOp<memref::AllocOp>()) {
-        if (writersTable.contains(alloc)) {
-          for (OpOperand *op : writersTable.at(alloc)) {
+      auto genericOpInputAlloc = findMemrefAlloc(operand);
+      if(succeeded(genericOpInputAlloc)) {
+        if (writersTable.contains(genericOpInputAlloc.value())) {
+          for (OpOperand *op : writersTable.at(genericOpInputAlloc.value())) {
             if (auto gemm = dyn_cast<GemmOp>(op->getOwner())) {
               const int64_t splitKFactor = gemm.getParams()->getSplitKFactor();
+              LLVM_DEBUG(llvm::dbgs() << "splitKFactor="<<splitKFactor<<"\n");
               if(splitKFactor > 1) {
-                operands.push_back(operand);
+                gemmOut.push_back(genericOpInputAlloc.value());
                 splitKFactors.push_back(splitKFactor);
               }
             }
@@ -122,12 +105,14 @@ static LogicalResult rewriteLinalgForSplitK(func::FuncOp &func, BufferDependency
         }
       }
     }
-    assert(operands.empty() || operands.size() == 1);
-    assert(operands.size() == splitKFactors.size());
-    if(operands.size() == 1) {
+    assert(gemmOut.empty() || gemmOut.size() == 1);
+    assert(gemmOut.size() == splitKFactors.size());
+    if(gemmOut.size() == 1) {
       LLVM_DEBUG(llvm::dbgs() << "Found linalg::GenericOp that reads GEMM output, let's modify it if it has addf and/or subf\n");
-      if(failed(divideAddBySplitkFactor(op, operands[0], splitKFactors[0], rewriter)))
+      if(failed(divideAddBySplitkFactor(op, gemmOut[0], splitKFactors[0], rewriter)))
         return failure();
+    } else {
+      LLVM_DEBUG(llvm::dbgs() << "No valid linalg::GenericOp found\n");
     }
   }
   return success();

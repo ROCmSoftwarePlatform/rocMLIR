@@ -45,7 +45,6 @@ LogicalResult mlir::rock::checkValidOutputFusion(linalg::GenericOp genericOp, Va
     auto outElementType = cast<ShapedType>(out.getType()).getElementType();
     if(!outElementType.isF32() && !outElementType.isF16()) {
       // Split-K currently supports only f32/f16 element types
-      llvm::errs() << "outElementType.isF32() && !outElementType.isF16\n";
       return failure();
     }
   }
@@ -100,7 +99,6 @@ LogicalResult mlir::rock::testFusionLegality(func::FuncOp func) {
   const auto &readersTable = analysis.getReadersTable();
   const auto &writersTable = analysis.getWritersTable();
 
-  // TODO: reduce_max and reduce_sum
   WalkResult walkResult =
       func.walk([&](rock::RockGemmWrapperInterface gemmOp) -> WalkResult {
         auto gemmResult = gemmOp.getOutArgument()->get();
