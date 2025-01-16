@@ -106,8 +106,8 @@ AmdArchInfo mlir::rock::lookupArchInfo(StringRef arch) {
     // TODO: some of those information are not accurate and need to be adjusted
     // after hardware release
     AmdArchInfo gfx12Info(gfx11Info);
-    gfx12Info.hasFp8ConversionInstrs = true;
-    gfx12Info.hasOcpFp8ConversionInstrs = false;
+    gfx12Info.hasFp8ConversionInstrs = false;
+    gfx12Info.hasOcpFp8ConversionInstrs = true;
     return gfx12Info;
   }
   llvm::errs() << "Warning: unknown architecture, falling back to defaults: "
@@ -130,12 +130,12 @@ GemmFeatures mlir::rock::AmdArchInfo::getDefaultFeatures(Type dataType) {
   bool isMfma = bitEnumContainsAll(theseFeatures, GemmFeatures::mfma);
 
   if (isMfma && !hasFp8ConversionInstrs) {
-    if (isa<Float8E4M3FNUZType>(elementType) or
+    if (isa<Float8E4M3FNUZType>(elementType) ||
         isa<Float8E5M2FNUZType>(elementType))
       theseFeatures = bitEnumClear(theseFeatures, GemmFeatures::mfma);
   }
   if (isMfma && !hasOcpFp8ConversionInstrs) {
-    if (isa<Float8E4M3FNType>(elementType) or isa<Float8E5M2Type>(elementType))
+    if (isa<Float8E4M3FNType>(elementType) || isa<Float8E5M2Type>(elementType))
       theseFeatures = bitEnumClear(theseFeatures, GemmFeatures::mfma);
   }
   return theseFeatures;
