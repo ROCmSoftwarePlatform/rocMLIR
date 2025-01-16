@@ -108,6 +108,16 @@ LogicalResult mlir::rock::testFusionLegality(func::FuncOp func) {
   const auto &readersTable = analysis.getReadersTable();
   const auto &writersTable = analysis.getWritersTable();
 
+  // can't fuse reduce_max with split-k
+  WalkResult reduceMaxRes = func.walk([](ReduceOp reduceOp) -> WalkResult {
+    if(reduceOp.getReduceMethod() == ReduceMethod::Max)
+      return WalkResult::interrupt();
+
+    return WalkResult::advance();
+  });
+  if(reduceMaxRes.wasInterrupted())
+    return failure();
+
   WalkResult walkResult =
       func.walk([&](rock::RockGemmWrapperInterface gemmOp) -> WalkResult {
         auto gemmResult = gemmOp.getOutArgument()->get();
