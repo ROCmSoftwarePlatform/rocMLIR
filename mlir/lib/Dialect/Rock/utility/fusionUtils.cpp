@@ -29,13 +29,17 @@ using namespace mlir;
 using namespace mlir::rock;
 using namespace arith;
 
-bool validOperationGemmOut(Operation& op) {
-  return isa<MulFOp, DivFOp, AddFOp, SubFOp, SIToFPOp, UIToFPOp, NegFOp, ExtUIOp, ExtSIOp, ExtFOp, TruncFOp, TruncIOp>(op);
+bool validOperationGemmOut(Operation &op) {
+  return isa<MulFOp, DivFOp, AddFOp, SubFOp, SIToFPOp, UIToFPOp, NegFOp,
+             ExtUIOp, ExtSIOp, ExtFOp, TruncFOp, TruncIOp>(op);
 }
 
-LogicalResult mlir::rock::checkValidOutputFusion(linalg::GenericOp genericOp, Value gemmResult, SmallVector<std::tuple<Operation*, int>>& adds) {
+LogicalResult mlir::rock::checkValidOutputFusion(
+    linalg::GenericOp genericOp, Value gemmResult,
+    SmallVector<std::tuple<Operation *, int>> &adds) {
   /* We can only fuse:
-  - add/sub gemmResult, otherTensor (which will be converted to add gemmResult, otherTensor/splitKFactor)
+  - add/sub gemmResult, otherTensor (which will be converted to add gemmResult,
+  otherTensor/splitKFactor)
   - add/sub gemmResult, gemmResult
   - mul/div gemmResult, otherTensor
   - neg
@@ -44,19 +48,20 @@ LogicalResult mlir::rock::checkValidOutputFusion(linalg::GenericOp genericOp, Va
   */
   auto outputs = genericOp.getOutputs();
   assert(outputs.size() == 1);
-  for(auto out : outputs) {
+  for (auto out : outputs) {
     auto outElementType = cast<ShapedType>(out.getType()).getElementType();
-    if(!outElementType.isF32() && !outElementType.isF16()) {
+    if (!outElementType.isF32() && !outElementType.isF16()) {
       // Split-K currently supports only f32/f16 element types
       return failure();
     }
   }
-  
+
   // find tensor index
   int tensorIndex = -1;
-  for (int i = 0; i < static_cast<int>(genericOp->getNumOperands()); ++i) {    
+  for (int i = 0; i < static_cast<int>(genericOp->getNumOperands()); ++i) {
     auto genericOpInputAlloc = findMemrefAlloc(genericOp->getOperand(i));
-    if (llvm::succeeded(genericOpInputAlloc) && genericOpInputAlloc->getMemref() == gemmResult)
+    if (llvm::succeeded(genericOpInputAlloc) &&
+        genericOpInputAlloc->getMemref() == gemmResult)
       tensorIndex = i;
   }
   assert(tensorIndex >= 0);
@@ -64,7 +69,7 @@ LogicalResult mlir::rock::checkValidOutputFusion(linalg::GenericOp genericOp, Va
   Block &body = genericOp.getRegion().front();
   derivedGemmResult.insert(body.getArgument(tensorIndex));
 
-  for (Operation& nestedOp : body.without_terminator()) {
+  for (Operation &nestedOp : body.without_terminator()) {
     // check if any operand is derived from the GEMM result
     int numGemmResults = 0;
     for (Value operand : nestedOp.getOperands()) {
@@ -77,19 +82,20 @@ LogicalResult mlir::rock::checkValidOutputFusion(linalg::GenericOp genericOp, Va
         return failure();
       }
 
-      if(isa<MulFOp>(nestedOp) && numGemmResults > 1) {
+      if (isa<MulFOp>(nestedOp) && numGemmResults > 1) {
         // gemmOut^2 is not allowed
         return failure();
       }
 
       // save add and sub ops to modify them: divide by splitKFactor
       // if both operands come from gemmOut, no need to modify anything
-      if(isa<AddFOp, SubFOp>(nestedOp) && numGemmResults == 1) {
+      if (isa<AddFOp, SubFOp>(nestedOp) && numGemmResults == 1) {
         int index = derivedGemmResult.contains(nestedOp.getOperand(0)) ? 0 : 1;
         adds.push_back(std::make_tuple(&nestedOp, index));
       }
-      
-      // add the op results to our tracked set since they're derived from the GEMM result
+
+      // add the op results to our tracked set since they're derived from the
+      // GEMM result
       for (Value result : nestedOp.getResults())
         derivedGemmResult.insert(result);
     }
@@ -115,7 +121,8 @@ LogicalResult mlir::rock::testFusionLegality(func::FuncOp func) {
         if (readersTable.contains(*maybeAlloc)) {
           for (OpOperand *op : readersTable.at(*maybeAlloc)) {
             if (isa<linalg::GenericOp>(op->getOwner())) {
-              geneticOps.push_back(llvm::dyn_cast<linalg::GenericOp>(op->getOwner()));
+              geneticOps.push_back(
+                  llvm::dyn_cast<linalg::GenericOp>(op->getOwner()));
             }
           }
         }
@@ -130,9 +137,10 @@ LogicalResult mlir::rock::testFusionLegality(func::FuncOp func) {
         }
 
         // check if generic ops are valid fusions
-        for(auto genericOp : geneticOps) {
-          SmallVector<std::tuple<Operation*, int>> adds;
-          if(failed(checkValidOutputFusion(genericOp, maybeAlloc.value(), adds)))
+        for (auto genericOp : geneticOps) {
+          SmallVector<std::tuple<Operation *, int>> adds;
+          if (failed(
+                  checkValidOutputFusion(genericOp, maybeAlloc.value(), adds)))
             return WalkResult::interrupt();
         }
 

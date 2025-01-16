@@ -15,13 +15,14 @@
 // limitations under the License.
 // ============================================================
 //
-// This pass modifies linalg.generic for split-k fusions. It converts any 
-// arith.addf/arith.subf gemmOut, other to arith.addf gemmOut, other/splitkFactor.
+// This pass modifies linalg.generic for split-k fusions. It converts any
+// arith.addf/arith.subf gemmOut, other to arith.addf gemmOut,
+// other/splitkFactor.
 //
 //===-----------------------------------------------------===//
 #include "mlir/Analysis/BufferDependencyAnalysis.h"
-#include "mlir/Dialect/Rock/utility/fusionUtils.h"
 #include "mlir/Dialect/Rock/utility/builderUtils.h"
+#include "mlir/Dialect/Rock/utility/fusionUtils.h"
 #include "mlir/Dialect/Rock/utility/loweringUtils.h"
 #include "mlir/Dialect/Rock/utility/transformMapUtils.h"
 #include "mlir/Pass/Pass.h"
@@ -43,34 +44,39 @@ using namespace mlir::rock;
 
 namespace {
 class RockGemmLinalgSplitkNormalizationPass
-    : public rock::impl::RockGemmLinalgSplitkNormalizationPassBase<RockGemmLinalgSplitkNormalizationPass> {
+    : public rock::impl::RockGemmLinalgSplitkNormalizationPassBase<
+          RockGemmLinalgSplitkNormalizationPass> {
   void runOnOperation() override;
 };
 } // end namespace
 
-static LogicalResult divideAddBySplitkFactor(linalg::GenericOp genericOp, Value gemmResult, int64_t splitKFactor, IRRewriter &b) {
-  SmallVector<std::tuple<Operation*, int>> adds;
-  if(failed(checkValidOutputFusion(genericOp, gemmResult, adds)))
+static LogicalResult divideAddBySplitkFactor(linalg::GenericOp genericOp,
+                                             Value gemmResult,
+                                             int64_t splitKFactor,
+                                             IRRewriter &b) {
+  SmallVector<std::tuple<Operation *, int>> adds;
+  if (failed(checkValidOutputFusion(genericOp, gemmResult, adds)))
     return failure();
 
-  for(auto [op, index] : adds) {
+  for (auto [op, index] : adds) {
     assert(index == 0 || index == 1);
-    LLVM_DEBUG(llvm::dbgs() << "Op to modify: "<<op<<"\n");
+    LLVM_DEBUG(llvm::dbgs() << "Op to modify: " << op << "\n");
     b.setInsertionPoint(op);
     Value gemmOut = op->getOperand(index);
     Value otherValue = (index == 0) ? op->getOperand(1) : op->getOperand(0);
-    auto splitKFactorValue = createConstantFloatOp(b, op->getLoc(), otherValue.getType(), otherValue.getType(), static_cast<float>(splitKFactor), otherValue.getType().isF32() ? APFloat::opOK : APFloat::opInexact);
-    Value otherBySplitk = b.createOrFold<arith::DivFOp>(op->getLoc(), otherValue, splitKFactorValue);
-    if(isa<arith::AddFOp>(op)) {
-      b.replaceOpWithNewOp<arith::AddFOp>(
-        op, gemmOut, otherBySplitk);
-    } else if(isa<arith::SubFOp>(op)) {
-      if(index == 0)
-        b.replaceOpWithNewOp<arith::SubFOp>(
-          op, gemmOut, otherBySplitk);
+    auto splitKFactorValue = createConstantFloatOp(
+        b, op->getLoc(), otherValue.getType(), otherValue.getType(),
+        static_cast<float>(splitKFactor),
+        otherValue.getType().isF32() ? APFloat::opOK : APFloat::opInexact);
+    Value otherBySplitk = b.createOrFold<arith::DivFOp>(
+        op->getLoc(), otherValue, splitKFactorValue);
+    if (isa<arith::AddFOp>(op)) {
+      b.replaceOpWithNewOp<arith::AddFOp>(op, gemmOut, otherBySplitk);
+    } else if (isa<arith::SubFOp>(op)) {
+      if (index == 0)
+        b.replaceOpWithNewOp<arith::SubFOp>(op, gemmOut, otherBySplitk);
       else
-        b.replaceOpWithNewOp<arith::SubFOp>(
-          op, otherBySplitk, gemmOut);
+        b.replaceOpWithNewOp<arith::SubFOp>(op, otherBySplitk, gemmOut);
     } else {
       return failure();
     }
@@ -78,25 +84,31 @@ static LogicalResult divideAddBySplitkFactor(linalg::GenericOp genericOp, Value 
   return success();
 }
 
-static LogicalResult rewriteLinalgForSplitK(func::FuncOp &func, BufferDependencyAnalysis &bufferDeps) {
+static LogicalResult
+rewriteLinalgForSplitK(func::FuncOp &func,
+                       BufferDependencyAnalysis &bufferDeps) {
   IRRewriter rewriter(func->getContext());
   SmallVector<linalg::GenericOp> genericOps;
-  func.walk([&genericOps](linalg::GenericOp genericOp) {genericOps.push_back(genericOp);});
+  func.walk([&genericOps](linalg::GenericOp genericOp) {
+    genericOps.push_back(genericOp);
+  });
   const auto &writersTable = bufferDeps.getWritersTable();
-  LLVM_DEBUG(llvm::dbgs() << "Found "<<genericOps.size()<<" linalg::GenericOp\n");
+  LLVM_DEBUG(llvm::dbgs() << "Found " << genericOps.size()
+                          << " linalg::GenericOp\n");
 
-  for(linalg::GenericOp op : genericOps) {
+  for (linalg::GenericOp op : genericOps) {
     SmallVector<Value> gemmOut;
     SmallVector<int64_t> splitKFactors;
-    for(auto operand : op->getOperands()) {
+    for (auto operand : op->getOperands()) {
       auto genericOpInputAlloc = findMemrefAlloc(operand);
-      if(succeeded(genericOpInputAlloc)) {
+      if (succeeded(genericOpInputAlloc)) {
         if (writersTable.contains(genericOpInputAlloc.value())) {
           for (OpOperand *op : writersTable.at(genericOpInputAlloc.value())) {
             if (auto gemm = dyn_cast<GemmOp>(op->getOwner())) {
               const int64_t splitKFactor = gemm.getParams()->getSplitKFactor();
-              LLVM_DEBUG(llvm::dbgs() << "splitKFactor="<<splitKFactor<<"\n");
-              if(splitKFactor > 1) {
+              LLVM_DEBUG(llvm::dbgs()
+                         << "splitKFactor=" << splitKFactor << "\n");
+              if (splitKFactor > 1) {
                 gemmOut.push_back(genericOpInputAlloc.value());
                 splitKFactors.push_back(splitKFactor);
               }
@@ -107,9 +119,12 @@ static LogicalResult rewriteLinalgForSplitK(func::FuncOp &func, BufferDependency
     }
     assert(gemmOut.empty() || gemmOut.size() == 1);
     assert(gemmOut.size() == splitKFactors.size());
-    if(gemmOut.size() == 1) {
-      LLVM_DEBUG(llvm::dbgs() << "Found linalg::GenericOp that reads GEMM output, let's modify it if it has addf and/or subf\n");
-      if(failed(divideAddBySplitkFactor(op, gemmOut[0], splitKFactors[0], rewriter)))
+    if (gemmOut.size() == 1) {
+      LLVM_DEBUG(llvm::dbgs()
+                 << "Found linalg::GenericOp that reads GEMM output, let's "
+                    "modify it if it has addf and/or subf\n");
+      if (failed(divideAddBySplitkFactor(op, gemmOut[0], splitKFactors[0],
+                                         rewriter)))
         return failure();
     } else {
       LLVM_DEBUG(llvm::dbgs() << "No valid linalg::GenericOp found\n");

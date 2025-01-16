@@ -35,8 +35,11 @@ LogicalResult testFusionLegality(func::FuncOp func);
 // a single `func:FuncOp`
 LogicalResult testFusionLegality(ModuleOp mod);
 
-// Checks whether the output fusion linalg::GenericOp is valid. Assuming a split-k kernel.
-LogicalResult checkValidOutputFusion(linalg::GenericOp genericOp, Value gemmResult, SmallVector<std::tuple<Operation*, int>>& adds);
+// Checks whether the output fusion linalg::GenericOp is valid. Assuming a
+// split-k kernel.
+LogicalResult
+checkValidOutputFusion(linalg::GenericOp genericOp, Value gemmResult,
+                       SmallVector<std::tuple<Operation *, int>> &adds);
 
 } // end namespace rock
 } // end namespace mlir

@@ -202,7 +202,6 @@ struct FoldBroadcast : public OpRewritePattern<rock::GemmOp> {
         op.getNumCUAttr(), op.getFeatures(), op.getStoreMethod(),
         op.getDerivedBlockSizeAttr(), op.getGridSizeAttr(), op.getParamsAttr());
 
-    
     // Convert optional attributes
     if (auto attr = (*op).template getAttrOfType<StringAttr>("perf_config"))
       gemm->setAttr("perf_config", attr);

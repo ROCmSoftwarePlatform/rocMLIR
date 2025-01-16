@@ -799,8 +799,10 @@ static void reconfigureLAGeneric(LinalgAlignRewriter &b,
 
 static LogicalResult canFuseAcrossAtomic(LinalgAlignRewriter &b,
                                          linalg::GenericOp laGeneric) {
-  auto outElementType = cast<ShapedType>(laGeneric.getOutputs()[0].getType()).getElementType();
-  return success(outElementType.isF32() || outElementType.isF16() || outElementType.isInteger(32));
+  auto outElementType =
+      cast<ShapedType>(laGeneric.getOutputs()[0].getType()).getElementType();
+  return success(outElementType.isF32() || outElementType.isF16() ||
+                 outElementType.isInteger(32));
 }
 
 /// Return true if all the operations inside a given `linalg.generic` are known
