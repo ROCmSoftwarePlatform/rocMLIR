@@ -57,7 +57,6 @@
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/ScopedPrinter.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -1600,7 +1599,7 @@ ReduceRewritePattern::matchAndRewrite(rock::ReduceOp reduceOp,
     stMethod =
         StoreMethodAttr::get(rewriter.getContext(), StoreMethod::AtomicMax);
   } else {
-    // Reduction type not supporteds
+    // Reduction type not supported
     return reduceOp.emitError()
            << "Unsupported reduction type : " << reduceOp.getReduceMethodAttr();
   }
