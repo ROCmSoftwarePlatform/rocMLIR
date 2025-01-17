@@ -86,7 +86,7 @@ Value createZeroConstantOp(OpBuilder &b, Location loc, Type type) {
   if (elementType.isIntOrIndex()) {
     return createConstantIntOp(b, loc, type, elementType, 0);
   } else {
-    return createConstantFloatOp(b, loc, type, elementType, 0.0);
+    return createConstantFloatOp(b, loc, type, elementType, 0.0f);
   }
 }
 

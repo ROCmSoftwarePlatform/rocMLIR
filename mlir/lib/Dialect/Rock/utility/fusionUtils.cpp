@@ -48,12 +48,10 @@ LogicalResult mlir::rock::checkValidOutputFusion(
   */
   auto outputs = genericOp.getOutputs();
   assert(outputs.size() == 1);
-  for (auto out : outputs) {
-    auto outElementType = cast<ShapedType>(out.getType()).getElementType();
-    if (!outElementType.isF32() && !outElementType.isF16()) {
-      // Split-K currently supports only f32/f16 element types
-      return failure();
-    }
+  auto outElementType = cast<ShapedType>(outputs[0].getType()).getElementType();
+  if (!outElementType.isF32() && !outElementType.isF16()) {
+    // Split-K currently supports only f32/f16 element types
+    return failure();
   }
 
   // find tensor index
@@ -64,7 +62,9 @@ LogicalResult mlir::rock::checkValidOutputFusion(
         genericOpInputAlloc->getMemref() == gemmResult)
       tensorIndex = i;
   }
-  assert(tensorIndex >= 0);
+  if(tensorIndex == -1)
+    return failure();
+
   llvm::DenseSet<Value> derivedGemmResult;
   Block &body = genericOp.getRegion().front();
   derivedGemmResult.insert(body.getArgument(tensorIndex));
@@ -82,7 +82,7 @@ LogicalResult mlir::rock::checkValidOutputFusion(
         return failure();
       }
 
-      if (isa<MulFOp>(nestedOp) && numGemmResults > 1) {
+      if (isa<MulFOp, DivFOp>(nestedOp) && numGemmResults > 1) {
         // gemmOut^2 is not allowed
         return failure();
       }
@@ -117,11 +117,11 @@ LogicalResult mlir::rock::testFusionLegality(func::FuncOp func) {
         }
 
         // save all `linalg::GenericOp` that read from a gemm output
-        SmallVector<linalg::GenericOp> geneticOps;
+        SmallVector<linalg::GenericOp> genericOps;
         if (readersTable.contains(*maybeAlloc)) {
           for (OpOperand *op : readersTable.at(*maybeAlloc)) {
             if (isa<linalg::GenericOp>(op->getOwner())) {
-              geneticOps.push_back(
+              genericOps.push_back(
                   llvm::dyn_cast<linalg::GenericOp>(op->getOwner()));
             }
           }
@@ -137,7 +137,7 @@ LogicalResult mlir::rock::testFusionLegality(func::FuncOp func) {
         }
 
         // check if generic ops are valid fusions
-        for (auto genericOp : geneticOps) {
+        for (auto genericOp : genericOps) {
           SmallVector<std::tuple<Operation *, int>> adds;
           if (failed(
                   checkValidOutputFusion(genericOp, maybeAlloc.value(), adds)))

@@ -58,25 +58,24 @@ static LogicalResult divideAddBySplitkFactor(linalg::GenericOp genericOp,
   if (failed(checkValidOutputFusion(genericOp, gemmResult, adds)))
     return failure();
 
-  for (auto [op, index] : adds) {
-    assert(index == 0 || index == 1);
-    LLVM_DEBUG(llvm::dbgs() << "Op to modify: " << op << "\n");
-    b.setInsertionPoint(op);
-    Value gemmOut = op->getOperand(index);
-    Value otherValue = (index == 0) ? op->getOperand(1) : op->getOperand(0);
+  for (auto [arithOp, gemmOutIndex] : adds) {
+    assert(gemmOutIndex == 0 || gemmOutIndex == 1);
+    LLVM_DEBUG(llvm::dbgs() << "Op to modify: " << arithOp << "\n");
+    b.setInsertionPoint(arithOp);
+    Value gemmOut = arithOp->getOperand(gemmOutIndex);
+    Value otherValue = (gemmOutIndex == 0) ? arithOp->getOperand(1) : arithOp->getOperand(0);
     auto splitKFactorValue = createConstantFloatOp(
-        b, op->getLoc(), otherValue.getType(), otherValue.getType(),
-        static_cast<float>(splitKFactor),
-        otherValue.getType().isF32() ? APFloat::opOK : APFloat::opInexact);
+        b, arithOp->getLoc(), otherValue.getType(), otherValue.getType(),
+        static_cast<float>(splitKFactor));
     Value otherBySplitk = b.createOrFold<arith::DivFOp>(
-        op->getLoc(), otherValue, splitKFactorValue);
-    if (isa<arith::AddFOp>(op)) {
-      b.replaceOpWithNewOp<arith::AddFOp>(op, gemmOut, otherBySplitk);
-    } else if (isa<arith::SubFOp>(op)) {
-      if (index == 0)
-        b.replaceOpWithNewOp<arith::SubFOp>(op, gemmOut, otherBySplitk);
+        arithOp->getLoc(), otherValue, splitKFactorValue);
+    if (isa<arith::AddFOp>(arithOp)) {
+      b.replaceOpWithNewOp<arith::AddFOp>(arithOp, gemmOut, otherBySplitk);
+    } else if (isa<arith::SubFOp>(arithOp)) {
+      if (gemmOutIndex == 0)
+        b.replaceOpWithNewOp<arith::SubFOp>(arithOp, gemmOut, otherBySplitk);
       else
-        b.replaceOpWithNewOp<arith::SubFOp>(op, otherBySplitk, gemmOut);
+        b.replaceOpWithNewOp<arith::SubFOp>(arithOp, otherBySplitk, gemmOut);
     } else {
       return failure();
     }
@@ -127,7 +126,7 @@ rewriteLinalgForSplitK(func::FuncOp &func,
                                          rewriter)))
         return failure();
     } else {
-      LLVM_DEBUG(llvm::dbgs() << "No valid linalg::GenericOp found\n");
+      LLVM_DEBUG(llvm::dbgs() << "We didn't find any linalg::GenericOp that needs to be modified\n");
     }
   }
   return success();
