@@ -4,7 +4,7 @@
 // CLONE-NEXT: Unranked Memref base
 
 module {
-  func.func private @dot_add__part_0(%arg0: tensor<1x128x64xf16> {mhal.read_access}, %arg1: tensor<1x64x256xf16> {mhal.read_access}, %arg2: tensor<1x128x256xf16> {mhal.read_access}) -> (tensor<1x128x1xf16> {mhal.write_access}) {
+  func.func private @dot_add_part_0(%arg0: tensor<1x128x64xf16> {mhal.read_access}, %arg1: tensor<1x64x256xf16> {mhal.read_access}, %arg2: tensor<1x128x256xf16> {mhal.read_access}) -> (tensor<1x128x1xf16> {mhal.write_access}) {
     %0 = "tosa.matmul"(%arg0, %arg1) : (tensor<1x128x64xf16>, tensor<1x64x256xf16>) -> tensor<1x128x256xf16>
     %1 = "tosa.add"(%0, %arg2) : (tensor<1x128x256xf16>, tensor<1x128x256xf16>) -> tensor<1x128x256xf16>
     %2 = "tosa.reduce_sum"(%1) {axis = 2 : i32} : (tensor<1x128x256xf16>) -> tensor<1x128x1xf16>
