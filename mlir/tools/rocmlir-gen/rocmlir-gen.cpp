@@ -793,8 +793,6 @@ static llvm::cl::opt<F8TypesChoice> forceF8Types(
     llvm::cl::desc("use OCP F8 types;  otherwise, use old F8 types"),
     llvm::cl::values(clEnumValN(F8TypesChoice::Arch, "arch",
                                 "usual F8 types for architecture"),
-                     clEnumValN(F8TypesChoice::Nanoo, "nanoo",
-                                "older 'NANOO' or 'FNUZ' types"),
                      clEnumValN(F8TypesChoice::Nanoo, "fnuz",
                                 "older 'NANOO' or 'FNUZ' types"),
                      clEnumValN(F8TypesChoice::OCP, "ocp",

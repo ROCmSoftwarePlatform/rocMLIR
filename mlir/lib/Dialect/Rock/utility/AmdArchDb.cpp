@@ -123,6 +123,8 @@ GemmFeatures mlir::rock::AmdArchInfo::getDefaultFeatures(Type dataType) {
     if (!(isa<Float16Type, BFloat16Type>(elementType) ||
           elementType.isInteger(8) ||
           (hasFp8ConversionInstrs &&
+           isa<Float8E5M2FNUZType, Float8E4M3FNUZType>(elementType)) ||
+          (hasOcpFp8ConversionInstrs &&
            isa<Float8E5M2Type, Float8E4M3FNType>(elementType)))) {
       theseFeatures = bitEnumClear(theseFeatures, GemmFeatures::wmma);
     }
