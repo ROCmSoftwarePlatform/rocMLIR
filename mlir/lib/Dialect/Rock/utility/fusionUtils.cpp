@@ -62,7 +62,7 @@ LogicalResult mlir::rock::checkValidOutputFusion(
         genericOpInputAlloc->getMemref() == gemmResult)
       tensorIndex = i;
   }
-  if(tensorIndex == -1)
+  if (tensorIndex == -1)
     return failure();
 
   llvm::DenseSet<Value> derivedGemmResult;

@@ -75,7 +75,7 @@ Value createConstantFloatOp(OpBuilder &b, Location loc, Type type,
     retValue = b.create<ConstantOp>(
         loc, SplatElementsAttr::get(shapedType, constValue));
   } else {
-    retValue = b.create<ConstantOp>(loc, type, b.getFloatAttr(elemType, apValue));
+    retValue = b.create<ConstantOp>(loc, type, b.getFloatAttr(elemType, value));
   }
 
   return retValue;
@@ -86,7 +86,7 @@ Value createZeroConstantOp(OpBuilder &b, Location loc, Type type) {
   if (elementType.isIntOrIndex()) {
     return createConstantIntOp(b, loc, type, elementType, 0);
   } else {
-    return createConstantFloatOp(b, loc, type, elementType, 0.0f);
+    return createConstantFloatOp(b, loc, type, elementType, 0.0);
   }
 }
 

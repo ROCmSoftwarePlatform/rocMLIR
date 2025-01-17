@@ -1198,9 +1198,8 @@ public:
                                 ConversionPatternRewriter &rw) const final {
     Type elementType =
         cast<ShapedType>(op.getInput().getType()).getElementType();
-    if (!elementType.isF32() && !elementType.isF16()) {
-      return rw.notifyMatchFailure(
-          op, "We only support F32 and F16 reductions, yet.");
+    if (!elementType.isF32()) {
+      return rw.notifyMatchFailure(op, "We only support F32 reductions, yet.");
     }
     Attribute outputInitVal = rw.getFloatAttr(elementType, 0.0000);
     return matchAndRewriteReductions(op, rock::ReduceMethod::Sum, outputInitVal,
@@ -1221,12 +1220,8 @@ public:
     if (elementType.isF32()) {
       outputInitVal = rw.getFloatAttr(
           elementType, APFloat::getInf(APFloat::IEEEsingle(), true));
-    } else if (elementType.isF16()) {
-      outputInitVal = rw.getFloatAttr(
-          elementType, APFloat::getInf(APFloat::IEEEhalf(), true));
     } else {
-      return rw.notifyMatchFailure(
-          op, "We only support F32 and F16 reductions, yet.");
+      return rw.notifyMatchFailure(op, "We only support F32 reductions, yet.");
     }
     return matchAndRewriteReductions(op, rock::ReduceMethod::Max, outputInitVal,
                                      rw);

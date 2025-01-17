@@ -63,7 +63,8 @@ static LogicalResult divideAddBySplitkFactor(linalg::GenericOp genericOp,
     LLVM_DEBUG(llvm::dbgs() << "Op to modify: " << arithOp << "\n");
     b.setInsertionPoint(arithOp);
     Value gemmOut = arithOp->getOperand(gemmOutIndex);
-    Value otherValue = (gemmOutIndex == 0) ? arithOp->getOperand(1) : arithOp->getOperand(0);
+    Value otherValue =
+        (gemmOutIndex == 0) ? arithOp->getOperand(1) : arithOp->getOperand(0);
     auto splitKFactorValue = createConstantFloatOp(
         b, arithOp->getLoc(), otherValue.getType(), otherValue.getType(),
         static_cast<float>(splitKFactor));
@@ -126,7 +127,8 @@ rewriteLinalgForSplitK(func::FuncOp &func,
                                          rewriter)))
         return failure();
     } else {
-      LLVM_DEBUG(llvm::dbgs() << "We didn't find any linalg::GenericOp that needs to be modified\n");
+      LLVM_DEBUG(llvm::dbgs() << "We didn't find any linalg::GenericOp that "
+                                 "needs to be modified\n");
     }
   }
   return success();
