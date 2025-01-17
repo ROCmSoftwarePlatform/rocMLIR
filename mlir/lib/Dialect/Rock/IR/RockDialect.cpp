@@ -1946,7 +1946,16 @@ LogicalResult ReduceOp::verify() {
                          "match the input.");
       }
     }
-  }
+  
+  auto inElemType = getIn().getType().getElementType();
+  auto outElemType = getOut().getType().getElementType();
+  if(inElemType != outElemType)
+    return emitError("element type of input and output is different");
+
+  if (getReduceMethod() == ReduceMethod::Max &&
+      isa<FloatType>(outElemType))
+    if (!outElemType.isF32())
+      return emitError("reduce max only supports f32");
   return success();
 }
 
