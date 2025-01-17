@@ -1954,8 +1954,7 @@ LogicalResult ReduceOp::verify() {
     return emitError("element type of input and output is different");
 
   if (getReduceMethod() == ReduceMethod::Max &&
-      isa<FloatType>(outElemType))
-    if (!outElemType.isF32())
+     !outElemType.isF32())
       return emitError("reduce max only supports f32");
     
   return success();
