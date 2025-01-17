@@ -297,20 +297,20 @@ GemmRewritePattern::arrangeSplitKTransform(OpBuilder &builder, GemmOp op,
     return op->emitError("can't trace gemm output to output argument");
   }
 
-  // initialize to zeros
-  auto elementType = cast<MemRefType>(matC.getType()).getElementType();
-  Attribute zero;
-  if (llvm::isa<FloatType>(elementType)) {
-    zero = builder.getFloatAttr(elementType, 0.0);
-  } else if (llvm::isa<IntegerType>(elementType)) {
-    zero = builder.getIntegerAttr(elementType, 0);
-  } else {
-    return op->emitError("expecting `float` or `int` element type");
-  }
-
   auto attrName = rock::PrefillAttr::getMnemonic();
-  for (auto arg : args.value())
+  for (auto arg : args.value()) {
+    // initialize to zeros
+    auto elementType = cast<MemRefType>(arg.getType()).getElementType();
+    Attribute zero;
+    if (llvm::isa<FloatType>(elementType)) {
+      zero = builder.getFloatAttr(elementType, 0.0f);
+    } else if (llvm::isa<IntegerType>(elementType)) {
+      zero = builder.getIntegerAttr(elementType, 0);
+    } else {
+      return op->emitError("expecting `float` or `int` element type");
+    }
     func.setArgAttrs(arg.getArgNumber(), builder.getNamedAttr(attrName, zero));
+  }
 
   const int64_t origK = cast<MemRefType>(a.getType()).getShape()[1];
   const int64_t kPad =
