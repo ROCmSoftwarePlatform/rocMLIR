@@ -419,12 +419,12 @@ static LogicalResult checkReduceConstraints(func::FuncOp &func, BufferDependency
     auto result = reduceOp.getOut();
     auto resultAlloc = findMemrefAlloc(result);
     if (llvm::succeeded(resultAlloc) && readersTable.contains(resultAlloc.value())) {
-      if(readersTable.at(resultAlloc.value()).size() != 1)
+      auto &resultReaders = readersTable.at(resultAlloc.value());
+      if(resultReaders.size() != 1)
         return reduceOp->emitOpError("reduce output is used more than once");
-      for (OpOperand *op : readersTable.at(resultAlloc.value())) {
-        if(!isa<memref::CopyOp>(op->getOwner()))
-          return reduceOp->emitOpError("not the final operation that produces the output");
-      }
+      
+      if(!isa<memref::CopyOp>(resultReaders[0]->getOwner()))
+        return reduceOp->emitOpError("not the final operation that produces the output");
     }
   }
 
