@@ -323,7 +323,17 @@ class PerfConfigsFinder():
             selected_configs = [perfconfigs[j]
                                 for j in range(m) if x[j].varValue == 1]
 
-            result[data_type] = selected_configs
+            # Determine the number of problems covered by each selected perfcofing
+            coverege_counts = {config: 0 for config in selected_configs}
+            for i in range(n):
+                for j in range(m):
+                    if A[i][j] == 1 and x[j].varValue == 1:
+                        coverege_counts[perfconfigs[j]] += 1
+
+            # Sort selected perfconfigs by the number of problem they cover
+            sorted_configs = sorted(selected_configs, key=lambda config: coverege_counts[config], reverse=True)
+
+            result[data_type] = sorted_configs
 
         return result
 
