@@ -10,6 +10,15 @@ func.func @test_basic(%arg0: tensor<2x10x100xf32>) -> tensor<2x10x1xf32> attribu
   return %1 : tensor<2x10x1xf32>
 }
 
+// CHECK-LABEL: @test_basic_f16
+// CHECK-SAME: -> (tensor<2x10x1xf16> {mhal.read_access, rock.prefill = 0.000000e+00 : f16})
+func.func @test_basic_f16(%arg0: tensor<2x10x100xf16>) -> tensor<2x10x1xf16> attributes {kernel} {
+  // CHECK: %[[outBuf:.*]] = bufferization.alloc_tensor() : tensor<2x10x1xf16>
+  // CHECK: rock.reduce  sum %arg0 into %[[outBuf]] {{.*}} {axis = 2 : index, blockSize = 256 : i32, gridSize = 8 : i32} : tensor<2x10x100xf16> into tensor<2x10x1xf16> -> tensor<2x10x1xf16>
+  %1 = "tosa.reduce_sum"(%arg0) {axis = 2 : i32} : (tensor<2x10x100xf16>) -> tensor<2x10x1xf16>
+  return %1 : tensor<2x10x1xf16>
+}
+
 // CHECK-LABEL: @test_middle_axis_reduction
 // CHECK-SAME: -> (tensor<4x1x20xf32> {mhal.read_access, rock.prefill = 0.000000e+00 : f32})
 func.func @test_middle_axis_reduction(%arg0: tensor<4x300x20xf32>) -> tensor<4x1x20xf32> attributes {kernel} {
