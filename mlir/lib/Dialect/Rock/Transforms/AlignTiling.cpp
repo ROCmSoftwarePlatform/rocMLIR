@@ -413,7 +413,7 @@ static LogicalResult
 checkReduceConstraints(func::FuncOp &func,
                        BufferDependencyAnalysis &bufferDeps) {
   SmallVector<ReduceOp> reduceOps;
-  func.walk([&reduceOps](ReduceOp reduceOp) {  reduceOps.push_back(reduceOp); });
+  func.walk([&reduceOps](ReduceOp reduceOp) { reduceOps.push_back(reduceOp); });
   const auto &readersTable = bufferDeps.getReadersTable();
 
   for (ReduceOp reduceOp : reduceOps) {
