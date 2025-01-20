@@ -1,11 +1,10 @@
 // RUN: rocmlir-driver --kernel-pipeline=gpu --arch gfx942 \
-// RUN:  --mlir-print-ir-after=rock-vectorize-fusions -o /dev/null 2>&1 %s | FileCheck %s --check-prefix=VECTORIZE
-
+// RUN: --mlir-print-ir-after=rock-vectorize-fusions -o /dev/null 2>&1 %s | FileCheck %s --check-prefix=VECTORIZE
 // RUN:  rocmlir-driver --kernel-pipeline=gpu,rocdl --arch=gfx942 %s | FileCheck %s --check-prefix=ROCDL
 // RUN:  rocmlir-driver --kernel-pipeline=gpu,rocdl --arch=gfx942 %s | \
-// RUN:    rocmlir-translate --gpu-module-to-rocdlir | opt -passes='default<O3>,strip' -mcpu=gfx942 -S | FileCheck %s --check-prefix=LLVM
+// RUN:  rocmlir-translate --gpu-module-to-rocdlir | opt -passes='default<O3>,strip' -mcpu=gfx942 -S | FileCheck %s --check-prefix=LLVM
 // RUN:  rocmlir-driver --kernel-pipeline=gpu,rocdl --arch=gfx942 %s | \
-// RUN:    rocmlir-translate --gpu-module-to-rocdlir | opt -passes='default<O3>,strip' -mcpu=gfx942 -S | llc -O3 -mcpu=gfx942 |  FileCheck %s --check-prefix=ASM
+// RUN:  rocmlir-translate --gpu-module-to-rocdlir | opt -passes='default<O3>,strip' -mcpu=gfx942 -S | llc -O3 -mcpu=gfx942 |  FileCheck %s --check-prefix=ASM
 #map = affine_map<(d0, d1) -> (0, d0, d1)>
 #map1 = affine_map<(d0, d1) -> (d0, d1)>
 #map2 = affine_map<(d0, d1, d2) -> (d0 * 128 + d1, d2)>
