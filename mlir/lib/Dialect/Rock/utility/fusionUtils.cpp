@@ -110,12 +110,12 @@ LogicalResult mlir::rock::testFusionLegality(func::FuncOp func) {
 
   // can't fuse reduce_max with split-k
   WalkResult reduceMaxRes = func.walk([](ReduceOp reduceOp) -> WalkResult {
-    if(reduceOp.getReduceMethod() == ReduceMethod::Max)
+    if (reduceOp.getReduceMethod() == ReduceMethod::Max)
       return WalkResult::interrupt();
 
     return WalkResult::advance();
   });
-  if(reduceMaxRes.wasInterrupted())
+  if (reduceMaxRes.wasInterrupted())
     return failure();
 
   WalkResult walkResult =

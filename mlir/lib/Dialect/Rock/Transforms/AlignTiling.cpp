@@ -409,22 +409,26 @@ void LinalgAlignRewriter::notifyMatchFailure(
 //    (no operations can appear after it)
 // 2. Each output can only go through a single reduction
 //    (nested reductions like reduce(reduce(x)) are not allowed)
-static LogicalResult checkReduceConstraints(func::FuncOp &func, BufferDependencyAnalysis &bufferDeps) {
+static LogicalResult
+checkReduceConstraints(func::FuncOp &func,
+                       BufferDependencyAnalysis &bufferDeps) {
   SmallVector<ReduceOp> reduceOps;
-  func.walk([&reduceOps](ReduceOp reduceOp) {reduceOps.push_back(reduceOp);});
+  func.walk([&reduceOps](ReduceOp reduceOp) {  reduceOps.push_back(reduceOp); });
   const auto &readersTable = bufferDeps.getReadersTable();
 
-  for(ReduceOp reduceOp : reduceOps) {
+  for (ReduceOp reduceOp : reduceOps) {
     // no other operation after reduce
     auto result = reduceOp.getOut();
     auto resultAlloc = findMemrefAlloc(result);
-    if (llvm::succeeded(resultAlloc) && readersTable.contains(resultAlloc.value())) {
+    if (llvm::succeeded(resultAlloc) &&
+        readersTable.contains(resultAlloc.value())) {
       auto &resultReaders = readersTable.at(resultAlloc.value());
-      if(resultReaders.size() != 1)
+      if (resultReaders.size() != 1)
         return reduceOp->emitOpError("reduce output is used more than once");
-      
-      if(!isa<memref::CopyOp>(resultReaders[0]->getOwner()))
-        return reduceOp->emitOpError("not the final operation that produces the output");
+
+      if (!isa<memref::CopyOp>(resultReaders[0]->getOwner()))
+        return reduceOp->emitOpError(
+            "not the final operation that produces the output");
     }
   }
 
@@ -1603,7 +1607,7 @@ ReduceRewritePattern::matchAndRewrite(rock::ReduceOp reduceOp,
     return reduceOp.emitError()
            << "Unsupported reduction type : " << reduceOp.getReduceMethodAttr();
   }
-  
+
   bool isUniqueReader;
   LogicalResult checkResult = checkUniqueReader(
       reduceOp.getIn().getDefiningOp(), reduceOp, isUniqueReader);
