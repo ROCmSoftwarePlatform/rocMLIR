@@ -437,8 +437,9 @@ static void buildConvOpWithQuantInfo(OpBuilder &builder, OperationState &result,
                                      DenseI64ArrayAttr stride,
                                      DenseI64ArrayAttr dilation,
                                      mlir::IntegerAttr group) {
+  TypeAttr accType;
   buildConvOpWithQuantInfo(builder, result, outputType, input, weight, bias,
-                           pad, stride, dilation);
+                           pad, stride, dilation, accType);
   if (group)
     result.addAttribute("group", group);
 }
