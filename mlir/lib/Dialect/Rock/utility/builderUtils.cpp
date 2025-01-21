@@ -75,7 +75,8 @@ Value createConstantFloatOp(OpBuilder &b, Location loc, Type type,
     retValue = b.create<ConstantOp>(
         loc, SplatElementsAttr::get(shapedType, constValue));
   } else {
-    retValue = b.create<ConstantOp>(loc, type, b.getFloatAttr(elemType, apValue));
+    retValue =
+        b.create<ConstantOp>(loc, type, b.getFloatAttr(elemType, apValue));
   }
 
   return retValue;
