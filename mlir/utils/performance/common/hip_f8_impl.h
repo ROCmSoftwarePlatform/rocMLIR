@@ -42,7 +42,7 @@ uint8_t cast_to_f8(T _x, bool stoch, uint32_t rng) {
   else
     x = reinterpret_cast<uint16_t &>(_x);
 
-  uint32_t y, head, mantissa;
+  uint32_t head, mantissa;
   int exponent, bias;
   uint32_t sign;
 
