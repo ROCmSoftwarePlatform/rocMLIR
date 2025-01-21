@@ -9,6 +9,7 @@
 #include "mlir/Dialect/Rock/utility/AmdArchDb.h"
 
 #include "mlir/Dialect/Rock/IR/Rock.h"
+#include "mlir/Dialect/Rock/IR/RockTypes.h"
 #include "mlir/IR/TypeUtilities.h"
 
 #include "llvm/ADT/StringSwitch.h"
@@ -29,19 +30,19 @@ static constexpr AmdArchInfo
                /*numEUPerCU=*/4, /*minNumCU=*/10,
                /*hasFp8ConversionInstrs=*/false,
                /*hasOcpFp8ConversionInstrs=*/false, /*maxNumXCC=*/1),
-    cdnaInfo(GemmFeatures::mfma | GemmFeatures::dot | GemmFeatures::atomic_add,
+    cdnaInfo(GemmFeatures::mfma | GemmFeatures::dot | GemmFeatures::atomic_add | GemmFeatures::atomic_add_f16,
              /*waveSize=*/64, /*maxWavesPerEU*/ 8, /*totalSGPRPerEU*/ 512,
              /*totalVGPRPerEU*/ 512, /*totalSharedMemPerCU*/ 65536,
              /*maxSharedMemPerWG*/ 65536, /*numEUPerCU=*/4, /*minNumCU=*/120,
              /*hasFp8ConversionInstrs=*/false,
              /*hasOcpFp8ConversionInstrs=*/false, /*maxNumXCC=*/1),
-    cdna2Info(GemmFeatures::mfma | GemmFeatures::dot | GemmFeatures::atomic_add,
+    cdna2Info(GemmFeatures::mfma | GemmFeatures::dot | GemmFeatures::atomic_add | GemmFeatures::atomic_add_f16,
               /*waveSize=*/64, /*maxWavesPerEU*/ 8, /*totalSGPRPerEU*/ 512,
               /*totalVGPRPerEU*/ 512, /*totalSharedMemPerCU*/ 65536,
               /*maxSharedMemPerWG*/ 65536, /*numEUPerCU=*/4, /*minNumCU=*/104,
               /*hasFp8ConversionInstrs=*/false,
               /*hasOcpFp8ConversionInstrs=*/false, /*maxNumXCC=*/1),
-    cdna3Info(GemmFeatures::mfma | GemmFeatures::dot | GemmFeatures::atomic_add,
+    cdna3Info(GemmFeatures::mfma | GemmFeatures::dot | GemmFeatures::atomic_add | GemmFeatures::atomic_add_f16,
               /*waveSize=*/64, /*maxWavesPerEU*/ 10, /*totalSGPRPerEU*/ 512,
               /*totalVGPRPerEU*/ 512, /*totalSharedMemPerCU*/ 65536,
               /*maxSharedMemPerWG*/ 65536, /*numEUPerCU=*/4, /*minNumCU=*/228,
@@ -108,6 +109,8 @@ AmdArchInfo mlir::rock::lookupArchInfo(StringRef arch) {
     AmdArchInfo gfx12Info(gfx11Info);
     gfx12Info.hasFp8ConversionInstrs = false;
     gfx12Info.hasOcpFp8ConversionInstrs = true;
+    gfx12Info.defaultFeatures =
+        bitEnumSet(gfx12Info.defaultFeatures, GemmFeatures::atomic_add_f16);
     return gfx12Info;
   }
   llvm::errs() << "Warning: unknown architecture, falling back to defaults: "

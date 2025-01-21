@@ -13,10 +13,12 @@
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Rock/IR/Rock.h"
+#include "mlir/Dialect/Rock/IR/RockTypes.h"
 #include "mlir/Dialect/Rock/Tuning/GridwiseGemmParams.h"
 #include "mlir/Dialect/Rock/utility/builderUtils.h"
 #include "mlir/Dialect/Rock/utility/loweringUtils.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Pass/AnalysisManager.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
@@ -166,4 +168,41 @@ LogicalResult mlir::rock::testFusionLegality(ModuleOp mod) {
          "expected ModuleOp containing a single func::FuncOp");
   func::FuncOp func = *(funcs.begin());
   return testFusionLegality(func);
+}
+
+LogicalResult mlir::rock::testFusionLegalityReduce(func::FuncOp func) {
+  WalkResult walkResult = func.walk([&](rock::ReduceOp reduceOp) -> WalkResult {
+    auto outElemType = reduceOp.getOut().getType().getElementType();
+    if (reduceOp.getReduceMethod() == ReduceMethod::Max) {
+      if (!isa<Float32Type>(outElemType))
+        return WalkResult::interrupt();
+
+      if (!bitEnumContainsAll(reduceOp.getFeatures(),
+                              GemmFeatures::atomic_fmax_f32))
+        return WalkResult::interrupt();
+    } else {
+      if (!isa<Float32Type, Float16Type>(outElemType))
+        return WalkResult::interrupt();
+
+      if (isa<Float32Type>(outElemType) &&
+          !bitEnumContainsAll(reduceOp.getFeatures(), GemmFeatures::atomic_add))
+        return WalkResult::interrupt();
+
+      if (isa<Float16Type>(outElemType) &&
+          !bitEnumContainsAll(reduceOp.getFeatures(),
+                              GemmFeatures::atomic_add_f16))
+        return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+
+  return success(!walkResult.wasInterrupted());
+}
+
+LogicalResult mlir::rock::testFusionLegalityReduce(ModuleOp mod) {
+  auto funcs = mod.getOps<func::FuncOp>();
+  assert(std::distance(funcs.begin(), funcs.end()) &&
+         "expected ModuleOp containing a single func::FuncOp");
+  func::FuncOp func = *(funcs.begin());
+  return testFusionLegalityReduce(func);
 }
