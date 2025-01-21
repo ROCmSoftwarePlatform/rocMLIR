@@ -166,5 +166,9 @@ def RockShuffleGemmForReductions : Pass<"rock-shuffle-gemm-for-reductions", "::m
   let dependentDialects = ["rock::RockDialect", "memref::MemRefDialect"];
 }
 
+def RockGemmLinalgSplitkNormalizationPass : Pass<"rock-gemm-linalg-splitk-normalization", "::mlir::func::FuncOp"> {
+  let summary = "This pass modifies linalg.generic for split-k fusions. It converts any arith.addf/arith.subf gemmOut, other to arith.addf gemmOut, other/splitkFactor";
+  let dependentDialects = ["rock::RockDialect", "func::FuncDialect"];
+}
 
 #endif // MLIR_DIALECT_ROCK_PASSES

@@ -152,6 +152,7 @@ void rock::buildKernelPipeline(OpPassManager &pm,
   funcPm.addPass(rock::createRockAffixTuningParametersPass(
       rock::RockAffixTuningParametersPassOptions{options.tuningFallback}));
   funcPm.addPass(rock::createRockConvToGemmPass());
+  funcPm.addPass(rock::createRockGemmLinalgSplitkNormalizationPass());
   funcPm.addPass(rock::createRockGemmToGridwisePass());
   funcPm.addPass(rock::createRockRegularizePass());
   funcPm.addPass(rock::createRockShuffleGemmForReductions());

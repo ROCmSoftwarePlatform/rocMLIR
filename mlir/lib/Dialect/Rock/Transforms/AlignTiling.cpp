@@ -404,6 +404,37 @@ void LinalgAlignRewriter::notifyMatchFailure(
 
 /// Fusion
 
+// Validates the constraints of rock.reduce operations:
+// 1. Each rock.reduce must be the final operation that produces its output
+//    (no operations can appear after it)
+// 2. Each output can only go through a single reduction
+//    (nested reductions like reduce(reduce(x)) are not allowed)
+static LogicalResult
+checkReduceConstraints(func::FuncOp &func,
+                       BufferDependencyAnalysis &bufferDeps) {
+  SmallVector<ReduceOp> reduceOps;
+  func.walk([&reduceOps](ReduceOp reduceOp) { reduceOps.push_back(reduceOp); });
+  const auto &readersTable = bufferDeps.getReadersTable();
+
+  for (ReduceOp reduceOp : reduceOps) {
+    // no other operation after reduce
+    auto result = reduceOp.getOut();
+    auto resultAlloc = findMemrefAlloc(result);
+    if (llvm::succeeded(resultAlloc) &&
+        readersTable.contains(resultAlloc.value())) {
+      auto &resultReaders = readersTable.at(resultAlloc.value());
+      if (resultReaders.size() != 1)
+        return reduceOp->emitOpError("reduce output is used more than once");
+
+      if (!isa<memref::CopyOp>(resultReaders[0]->getOwner()))
+        return reduceOp->emitOpError(
+            "not the final operation that produces the output");
+    }
+  }
+
+  return success();
+}
+
 static Value applyViewsOnDest(LinalgAlignRewriter &rewriter, Location loc,
                               Value dest, ArrayRef<TransformMapAttr> views) {
   for (TransformMapAttr trMap : llvm::reverse(views)) {
@@ -512,8 +543,6 @@ traceToWriter(Value startVal,
         trOp = dyn_cast_if_present<TransformOp>(
             trOp.getViewSource().getDefiningOp());
       }
-      // This recursion got us our transform stack in the opposite order.
-      llvm::reverse(writerToStartValViews);
     }
   };
   SmallVector<std::pair<Value, Operation *>> worklist =
@@ -799,20 +828,10 @@ static void reconfigureLAGeneric(LinalgAlignRewriter &b,
 
 static LogicalResult canFuseAcrossAtomic(LinalgAlignRewriter &b,
                                          linalg::GenericOp laGeneric) {
-  auto opCanSwapWithAtomic = [](Operation &op) -> bool {
-    return llvm::TypeSwitch<Operation &, bool>(op)
-        .Case<linalg::YieldOp>([](linalg::YieldOp ignored) { return true; })
-        .Case<arith::TruncFOp>([](arith::TruncFOp truncOp) {
-          Type resultType = truncOp.getOut().getType();
-          return isa<Float32Type, Float16Type>(resultType);
-        })
-        .Case<arith::TruncIOp>([](arith::TruncIOp truncOp) {
-          return truncOp.getOut().getType().isInteger(32);
-        })
-        .Default([](Operation &ignored) { return false; });
-  };
-  return success(
-      llvm::all_of(laGeneric.getRegion().getOps(), opCanSwapWithAtomic));
+  auto outElementType =
+      cast<ShapedType>(laGeneric.getOutputs()[0].getType()).getElementType();
+  return success(outElementType.isF32() || outElementType.isF16() ||
+                 outElementType.isInteger(32));
 }
 
 /// Return true if all the operations inside a given `linalg.generic` are known
@@ -1582,19 +1601,9 @@ ReduceRewritePattern::matchAndRewrite(rock::ReduceOp reduceOp,
     stMethod =
         StoreMethodAttr::get(rewriter.getContext(), StoreMethod::AtomicMax);
   } else {
-    // We are failing the pass here because rock.reduce appearing here means
-    // we are committed to fusion and this is case, we cant handle (so far) in
-    // this or a later pass.
+    // Reduction type not supported
     return reduceOp.emitError()
            << "Unsupported reduction type : " << reduceOp.getReduceMethodAttr();
-  }
-
-  if (threadwiseWriteOp.getStoreMethod() != rock::StoreMethod::Set) {
-    // We are failing the pass here because another rock.reduce appearing here
-    // means we are committed to fusion and this is case, we cant handle (so
-    // far) in this or a later pass.
-    return reduceOp.emitError("Another reduction op is not able to be fused "
-                              "with a prior reduction op.");
   }
 
   bool isUniqueReader;
@@ -1651,6 +1660,11 @@ void RockLinalgAlignPass::runOnOperation() {
   if (!func->hasAttr("kernel"))
     return;
   {
+    BufferDependencyAnalysis &bufferDeps =
+        getAnalysis<BufferDependencyAnalysis>();
+    if (failed(checkReduceConstraints(func, bufferDeps))) {
+      return signalPassFailure();
+    }
     RewritePatternSet patterns(ctx);
     patterns.add<LAGenericRewritePattern, ReduceRewritePattern,
                  MemcpyRewritePattern>(ctx);
