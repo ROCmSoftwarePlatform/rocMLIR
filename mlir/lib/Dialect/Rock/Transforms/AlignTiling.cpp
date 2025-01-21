@@ -543,8 +543,6 @@ traceToWriter(Value startVal,
         trOp = dyn_cast_if_present<TransformOp>(
             trOp.getViewSource().getDefiningOp());
       }
-      // This recursion got us our transform stack in the opposite order.
-      llvm::reverse(writerToStartValViews);
     }
   };
   SmallVector<std::pair<Value, Operation *>> worklist =
