@@ -384,9 +384,9 @@ static llvm::cl::opt<FeatureToggle> atomicAddF16Feature(
     llvm::cl::values(clEnumValN(FeatureToggle::infer, "infer",
                                 "use the default value provided by the chip"),
                      clEnumValN(FeatureToggle::on, "on",
-                                "force atomic_add into the feature list"),
+                                "force atomic_add_f16 into the feature list"),
                      clEnumValN(FeatureToggle::off, "off",
-                                "remove atomic_add from the feature list")),
+                                "remove atomic_add_f16 from the feature list")),
     llvm::cl::init(FeatureToggle::infer));
 
 // atomicFmaxF32
