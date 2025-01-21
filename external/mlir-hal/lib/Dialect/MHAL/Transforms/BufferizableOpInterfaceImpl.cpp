@@ -30,24 +30,6 @@ namespace mlir {
 namespace mhal {
 namespace {
 
-/// Return the index of the bbArg in the given FuncOp that is equivalent to the
-/// specified return value (if any).
-static std::optional<int64_t>
-getEquivalentFuncArgIdx(FuncOp funcOp, const FuncAnalysisState &state,
-                        int64_t returnValIdx) {
-  auto funcOpIt = state.equivalentFuncArgs.find(funcOp);
-  if (funcOpIt == state.equivalentFuncArgs.end())
-    // No equivalence info stores for funcOp.
-    return std::nullopt;
-
-  auto retValIt = funcOpIt->getSecond().find(returnValIdx);
-  if (retValIt == funcOpIt->getSecond().end())
-    // Return value has no equivalent bbArg.
-    return std::nullopt;
-
-  return retValIt->getSecond();
-}
-
 /// Return the FuncOp called by `callOp`.
 static FuncOp getCalledFunction(CallOpInterface callOp) {
   SymbolRefAttr sym = dyn_cast<SymbolRefAttr>(callOp.getCallableForCallee());

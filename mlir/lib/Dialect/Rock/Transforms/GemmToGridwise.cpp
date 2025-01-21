@@ -72,7 +72,7 @@ struct GemmRewritePattern : public OpConversionPattern<GemmOp> {
       : OpConversionPattern<GemmOp>(context), bufferDeps(bufferDeps) {}
 
   LogicalResult matchAndRewrite(GemmOp op, GemmOpAdaptor adaptor,
-                                ConversionPatternRewriter &b) const override;
+                                ConversionPatternRewriter &rw) const override;
 
   LogicalResult computeGridSize(ConversionPatternRewriter &rw, GemmOp op,
                                 Value a, Value b) const;
@@ -87,7 +87,7 @@ struct GemmRewritePattern : public OpConversionPattern<GemmOp> {
 struct AttentionRewritePattern : public OpConversionPattern<AttentionOp> {
   using OpConversionPattern<AttentionOp>::OpConversionPattern;
   LogicalResult matchAndRewrite(AttentionOp op, AttentionOpAdaptor adaptor,
-                                ConversionPatternRewriter &b) const override;
+                                ConversionPatternRewriter &rw) const override;
 
   LogicalResult computeGridSize(ConversionPatternRewriter &rw, AttentionOp op,
                                 Value queries, Value keys, Value values) const;
@@ -155,7 +155,6 @@ GemmRewritePattern::matchAndRewrite(GemmOp op, GemmOpAdaptor adaptor,
   MemRefType typeC = cast<MemRefType>(c.getType());
   Type elemTypeA = typeA.getElementType();
   Type elemTypeB = typeB.getElementType();
-  Type elemTypeC = typeC.getElementType();
   ArrayRef<int64_t> aShape = typeA.getShape();
   ArrayRef<int64_t> bShape = typeB.getShape();
 
@@ -186,17 +185,9 @@ GemmRewritePattern::matchAndRewrite(GemmOp op, GemmOpAdaptor adaptor,
 
   const int64_t splitKFactor = op.getParams()->getSplitKFactor();
   if (splitKFactor > 1) {
-    const auto isAllowedTypeC =
-        elemTypeC == rw.getF32Type() || elemTypeC == rw.getF16Type();
-
     if (!bitEnumContainsAll(op.getFeatures(), GemmFeatures::atomic_add)) {
       return op.emitError(
           "Split-K `GemmOp` requires support of `atomic_add` hardware feature");
-    }
-
-    if (!isAllowedTypeC) {
-      return op.emitError(
-          "Split-K `GemmOp` currently supports only f32/f16 element types");
     }
 
     auto maybeSplitk =
@@ -297,20 +288,20 @@ GemmRewritePattern::arrangeSplitKTransform(OpBuilder &builder, GemmOp op,
     return op->emitError("can't trace gemm output to output argument");
   }
 
-  // initialize to zeros
-  auto elementType = cast<MemRefType>(matC.getType()).getElementType();
-  Attribute zero;
-  if (llvm::isa<FloatType>(elementType)) {
-    zero = builder.getFloatAttr(elementType, 0.0);
-  } else if (llvm::isa<IntegerType>(elementType)) {
-    zero = builder.getIntegerAttr(elementType, 0);
-  } else {
-    return op->emitError("expecting `float` or `int` element type");
-  }
-
   auto attrName = rock::PrefillAttr::getMnemonic();
-  for (auto arg : args.value())
+  for (auto arg : args.value()) {
+    // initialize to zeros
+    auto elementType = cast<MemRefType>(arg.getType()).getElementType();
+    Attribute zero;
+    if (llvm::isa<FloatType>(elementType)) {
+      zero = builder.getFloatAttr(elementType, 0.0f);
+    } else if (llvm::isa<IntegerType>(elementType)) {
+      zero = builder.getIntegerAttr(elementType, 0);
+    } else {
+      return op->emitError("expecting `float` or `int` element type");
+    }
     func.setArgAttrs(arg.getArgNumber(), builder.getNamedAttr(attrName, zero));
+  }
 
   const int64_t origK = cast<MemRefType>(a.getType()).getShape()[1];
   const int64_t kPad =
