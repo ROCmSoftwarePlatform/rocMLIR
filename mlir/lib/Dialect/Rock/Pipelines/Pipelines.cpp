@@ -179,6 +179,11 @@ void rock::buildKernelPipeline(OpPassManager &pm,
       funcPm.addPass(createConvertLinalgToAffineLoopsPass());
       funcPm.addPass(rock::createRockVectorizeFusionsPass());
     }
+    // We call output swizzle pass twice because:
+    // The first call might have been skipped due to using too much LDS.
+    // The second pass might use less LDS because it happens after
+    // fusions and they might truncate the result.
+    funcPm.addPass(rock::createRockOutputSwizzlePass());
     funcPm.addPass(rock::createRockReuseLDSPass());
 
     // rock lowering for reductions
