@@ -28,12 +28,19 @@ namespace rock {
 // if the Data Parallel GEMM scheme is used.
 LogicalResult testFusionLegality(func::FuncOp func);
 
+// Checks whether a function contains any `rock::ReduceOp` and
+// the atomic operation is supported by the hardware.
+LogicalResult testFusionLegalityReduce(func::FuncOp func);
+
 // This is an overload of the `testFusionLegality` which is more convenient
 // to use in CAPI. Given a `ModuleOp`, the function retrieve the embedded
 // `func:FuncOp` and calls the implementation `testFusionLegality` (see above).
 // Note, this overloaded function assumes that `ModuleOp` contains
 // a single `func:FuncOp`
 LogicalResult testFusionLegality(ModuleOp mod);
+
+// Same as above, overload of `testFusionLegalityReduce` for `ModuleOp`.
+LogicalResult testFusionLegalityReduce(ModuleOp mod);
 
 // Checks whether the output fusion linalg::GenericOp is valid. Assuming a
 // split-k kernel.

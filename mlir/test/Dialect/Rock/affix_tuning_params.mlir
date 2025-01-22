@@ -52,7 +52,7 @@ func.func @rock_conv_i8(%filter : memref<1x128x8x3x3xi8>, %input : memref<128x1x
   // CHECK-SAME: params = #rock.xdlops_gemm_derived_params<kpackPerBlock = 4, mPerBlock = 64, nPerBlock = 256, kpack = 4, mPerWave = 32, nPerWave = 128, mnPerXdl = 16, splitKFactor = 1, forceUnroll = true>
   // GRID: rock.gridwise_gemm
   // GRID-SAME: gridSize = 900
-  rock.conv(%filter, %input, %output) features = mfma|dot|atomic_add {
+  rock.conv(%filter, %input, %output) features = mfma|dot|atomic_add|atomic_add_f16 {
     arch = "amdgcn-amd-amdhsa:gfx908",
     filter_layout = ["g", "k", "c", "0", "1"],
     input_layout = ["ni", "gi", "ci", "0i", "1i"],
@@ -72,7 +72,7 @@ func.func @rock_conv_bwd_data(%filter: memref<1x1024x1024x1x1xf32>, %input: memr
   // CHECK-SAME: params = #rock.xdlops_gemm_derived_params<kpackPerBlock = 4, mPerBlock = 128, nPerBlock = 128, kpack = 4, mPerWave = 128, nPerWave = 32, mnPerXdl = 16, splitKFactor = 1, forceUnroll = true>
   // GRID: rock.gridwise_gemm
   // GRID-SAME: gridSize = 1568
-  rock.conv_bwd_data(%filter, %input, %output) features = mfma|dot|atomic_add {
+  rock.conv_bwd_data(%filter, %input, %output) features = mfma|dot|atomic_add|atomic_add_f16 {
     arch = "amdgcn-amd-amdhsa:gfx908",
     dilations = [1 : index, 1 : index],
     filter_layout = ["g", "k", "c", "0", "1"],
@@ -93,7 +93,7 @@ func.func @rock_conv_bwd_data_f16(%filter: memref<1x1024x1024x1x1xf16>, %input: 
   // CHECK-SAME: params = #rock.xdlops_gemm_derived_params<kpackPerBlock = 8, mPerBlock = 64, nPerBlock = 64, kpack = 8, mPerWave = 32, nPerWave = 32, mnPerXdl = 32, splitKFactor = 1, forceUnroll = true>
   // GRID: rock.gridwise_gemm
   // GRID-SAME: gridSize = 6272
-  rock.conv_bwd_data(%filter, %input, %output) features = mfma|dot|atomic_add {
+  rock.conv_bwd_data(%filter, %input, %output) features = mfma|dot|atomic_add|atomic_add_f16 {
     arch = "amdgcn-amd-amdhsa:gfx908",
     dilations = [1 : index, 1 : index],
     filter_layout = ["g", "k", "c", "0", "1"],
@@ -234,7 +234,7 @@ func.func @rock_conv_7x7_tuning(%arg0: memref<1x64x3x7x7xf32>, %arg1: memref<256
   // CHECK-SAME: params = #rock.xdlops_gemm_derived_params<kpackPerBlock = 8, mPerBlock = 64, nPerBlock = 256, kpack = 1, mPerWave = 64, nPerWave = 64, mnPerXdl = 64, splitKFactor = 1, forceUnroll = true>
   // GRID: rock.gridwise_gemm
   // GRID-SAME: gridSize = 12544
-  rock.conv(%arg0, %arg1, %arg2) features =  mfma|dot|atomic_add {
+  rock.conv(%arg0, %arg1, %arg2) features =  mfma|dot|atomic_add|atomic_add_f16 {
     arch = "amdgcn-amd-amdhsa:gfx908",
     dilations = [1 : index, 1 : index],
     filter_layout = ["g", "k", "c", "0", "1"],
@@ -257,7 +257,7 @@ func.func @rock_conv_7x7(%arg0: memref<1x64x3x7x7xf32>, %arg1: memref<256x1x3x23
   // CHECK-SAME: params = #rock.xdlops_gemm_derived_params<kpackPerBlock = 8, mPerBlock = 64, nPerBlock = 128, kpack = 1, mPerWave = 64, nPerWave = 32, mnPerXdl = 32, splitKFactor = 1, forceUnroll = true>
   // GRID: rock.gridwise_gemm
   // GRID-SAME: gridSize = 25088
-  rock.conv(%arg0, %arg1, %arg2) features =  mfma|dot|atomic_add {
+  rock.conv(%arg0, %arg1, %arg2) features =  mfma|dot|atomic_add|atomic_add_f16 {
     arch = "amdgcn-amd-amdhsa:gfx908",
     dilations = [1 : index, 1 : index],
     filter_layout = ["g", "k", "c", "0", "1"],
@@ -277,7 +277,7 @@ func.func @rock_conv_bwd_weight_7x7(%arg0: memref<1x64x3x7x7xf32>, %arg1: memref
   // CHECK-SAME: params = #rock.xdlops_gemm_derived_params<kpackPerBlock = 8, mPerBlock = 64, nPerBlock = 32, kpack = 4, mPerWave = 16, nPerWave = 32, mnPerXdl = 16, splitKFactor = 1, forceUnroll = true>
   // GRID: rock.gridwise_gemm
   // GRID-SAME: gridSize = 5
-  rock.conv_bwd_weight(%arg0, %arg1, %arg2) features =  mfma|dot|atomic_add {
+  rock.conv_bwd_weight(%arg0, %arg1, %arg2) features =  mfma|dot|atomic_add|atomic_add_f16 {
     arch = "amdgcn-amd-amdhsa:gfx908",
     dilations = [1 : index, 1 : index],
     filter_layout = ["g", "k", "c", "0", "1"],
@@ -298,7 +298,7 @@ func.func @rock_conv_bwd_data_7x7_tuning(%arg0: memref<1x64x3x7x7xf32>, %arg1: m
   // CHECK-SAME: params = #rock.xdlops_gemm_derived_params<kpackPerBlock = 8, mPerBlock = 16, nPerBlock = 128, kpack = 4, mPerWave = 16, nPerWave = 32, mnPerXdl = 16, splitKFactor = 1, forceUnroll = true>
   // GRID: rock.gridwise_gemm
   // GRID-SAME: gridSize = 26450
-  rock.conv_bwd_data(%arg0, %arg1, %arg2) features =  mfma|dot|atomic_add {
+  rock.conv_bwd_data(%arg0, %arg1, %arg2) features =  mfma|dot|atomic_add|atomic_add_f16 {
     arch = "amdgcn-amd-amdhsa:gfx908",
     dilations = [1 : index, 1 : index],
     filter_layout = ["g", "k", "c", "0", "1"],
@@ -320,7 +320,7 @@ func.func @rock_conv_bwd_data_7x7(%arg0: memref<1x64x3x7x7xf32>, %arg1: memref<2
   // CHECK-SAME: params = #rock.xdlops_gemm_derived_params<kpackPerBlock = 8, mPerBlock = 16, nPerBlock = 16, kpack = 8, mPerWave = 16, nPerWave = 16, mnPerXdl = 16, splitKFactor = 1, forceUnroll = true>
   // GRID: rock.gridwise_gemm
   // GRID-SAME: gridSize = 211600
-  rock.conv_bwd_data(%arg0, %arg1, %arg2) features =  mfma|dot|atomic_add {
+  rock.conv_bwd_data(%arg0, %arg1, %arg2) features =  mfma|dot|atomic_add|atomic_add_f16 {
     arch = "amdgcn-amd-amdhsa:gfx908",
     dilations = [1 : index, 1 : index],
     filter_layout = ["g", "k", "c", "0", "1"],
@@ -355,7 +355,7 @@ func.func @rock_gemm_from_i8_conv(%a : memref<1x72x128xi8>, %b : memref<1x72x115
   // CHECK-SAME: params = #rock.xdlops_gemm_derived_params<kpackPerBlock = 8, mPerBlock = 64, nPerBlock = 64, kpack = 4, mPerWave = 64, nPerWave = 16, mnPerXdl = 16, splitKFactor = 1, forceUnroll = true>
   // GRID: rock.gridwise_gemm
   // GRID-SAME: gridSize = 3600
-  rock.gemm %c = tr %a * %b features = mfma|dot|atomic_add storeMethod = set {
+  rock.gemm %c = tr %a * %b features = mfma|dot|atomic_add|atomic_add_f16 storeMethod = set {
     arch = "amdgcn-amd-amdhsa:gfx908",
     numCU = 120 : i32
   } : memref<1x128x115200xi32> = memref<1x72x128xi8> * memref<1x72x115200xi8>
@@ -373,7 +373,7 @@ func.func @rock_gemm_from_i8_conv_gfx940(%a : memref<1x72x128xi8>, %b : memref<1
   // CHECK-SAME: params = #rock.xdlops_gemm_derived_params<kpackPerBlock = 4, mPerBlock = 64, nPerBlock = 256, kpack = 16, mPerWave = 64, nPerWave = 64, mnPerXdl = 16, splitKFactor = 1, forceUnroll = true>
   // GRID: rock.gridwise_gemm
   // GRID-SAME: gridSize = 900
-  rock.gemm %c = tr %a * %b features = mfma|dot|atomic_add storeMethod = set {
+  rock.gemm %c = tr %a * %b features = mfma|dot|atomic_add|atomic_add_f16 storeMethod = set {
     arch = "amdgcn-amd-amdhsa:gfx940",
     numCU = 120 : i32
   } : memref<1x128x115200xi32> = memref<1x72x128xi8> * memref<1x72x115200xi8>
@@ -389,7 +389,7 @@ func.func @rock_gemm_xdlops_fp8_bf8(%a : memref<1x72x128xf8E4M3FNUZ>, %b : memre
   // CHECK-SAME: params = #rock.xdlops_gemm_derived_params<kpackPerBlock = 4, mPerBlock = 64, nPerBlock = 256, kpack = 16, mPerWave = 64, nPerWave = 64, mnPerXdl = 16, splitKFactor = 1, forceUnroll = true>
   // GRID: rock.gridwise_gemm
   // GRID-SAME: gridSize = 900
-  rock.gemm %c = tr %a * %b features = mfma|dot|atomic_add storeMethod = set {
+  rock.gemm %c = tr %a * %b features = mfma|dot|atomic_add|atomic_add_f16 storeMethod = set {
     arch = "amdgcn-amd-amdhsa:gfx940",
     numCU = 120 : i32
   } : memref<1x128x115200xf32> = memref<1x72x128xf8E4M3FNUZ> * memref<1x72x115200xf8E5M2FNUZ>
@@ -405,7 +405,7 @@ func.func @rock_gemm_xdlops_fp8_bf8_ocp(%a : memref<1x72x128xf8E4M3FN>, %b : mem
   // CHECK-SAME: params = #rock.xdlops_gemm_derived_params<kpackPerBlock = 4, mPerBlock = 64, nPerBlock = 256, kpack = 16, mPerWave = 64, nPerWave = 64, mnPerXdl = 16, splitKFactor = 1, forceUnroll = true>
   // GRID: rock.gridwise_gemm
   // GRID-SAME: gridSize = 900
-  rock.gemm %c = tr %a * %b features = mfma|dot|atomic_add storeMethod = set {
+  rock.gemm %c = tr %a * %b features = mfma|dot|atomic_add|atomic_add_f16 storeMethod = set {
     arch = "amdgcn-amd-amdhsa:gfx940",
     numCU = 120 : i32
   } : memref<1x128x115200xf32> = memref<1x72x128xf8E4M3FN> * memref<1x72x115200xf8E5M2>
@@ -438,7 +438,7 @@ func.func @rock_attention_large(%arg0: memref<1x16384x512xf32>, %arg1: memref<1x
   rock.attention{
     qk = %arg0 * %arg1 : memref<1x16384x512xf32>, memref<1x512x16384xf32>
     %arg3 = softmax(qk) * %arg2 : memref<1x16384x512xf32> -> memref<1x16384x512xf32>
-  } {arch = "gfx942:sramecc+:xnack-", features = #rock<GemmFeatures mfma|dot|atomic_add>, perf_config = "attn:v1:128,128,128,2,64,64,8,1", firstGemmIdx = 0 : i32}
+  } {arch = "gfx942:sramecc+:xnack-", features = #rock<GemmFeatures mfma|dot|atomic_add|atomic_add_f16>, perf_config = "attn:v1:128,128,128,2,64,64,8,1", firstGemmIdx = 0 : i32}
   return
 }
 
@@ -468,14 +468,14 @@ func.func @rock_attention_mperblockg1_mfma(%arg0: memref<1x384x64xf16>, %arg1: m
   rock.attention{
    qk = %arg0 * tr %arg1 : memref<1x384x64xf16>, memref<1x384x64xf16>
    %arg3 = softmax(qk) * %arg2 : memref<1x384x64xf16> -> memref<1x384x64xf16>
-  } {arch = "gfx942:sramecc+:xnack-", features = #rock<GemmFeatures mfma|dot|atomic_add>, perf_config = "attn:v1:128,256,128,2,64,64,8,1", firstGemmIdx = 0 : i32}
+  } {arch = "gfx942:sramecc+:xnack-", features = #rock<GemmFeatures mfma|dot|atomic_add|atomic_add_f16>, perf_config = "attn:v1:128,256,128,2,64,64,8,1", firstGemmIdx = 0 : i32}
   return
 }
 
 // CHECK-LABEL: func.func @rock_conv_tuning
 // GRID-LABEL: func.func @rock_conv_tuning
 func.func @rock_conv_tuning(%arg0: memref<1x1x1x3x3xf32>, %arg1: memref<64x1x1x14x14xf32>, %arg2: memref<64x1x1x14x14xf32>) attributes {kernel = 0 : i32, mhal.arch = "amdgcn-amd-amdhsa:gfx90a:sramecc+:xnack-"} {
-  rock.conv(%arg0, %arg1, %arg2) features =  mfma|dot|atomic_add {
+  rock.conv(%arg0, %arg1, %arg2) features =  mfma|dot|atomic_add|atomic_add_f16 {
     arch = "amdgcn-amd-amdhsa:gfx90a:sramecc+:xnack-",
     dilations = [1 : index, 1 : index],
     filter_layout = ["g", "k", "c", "0", "1"],
