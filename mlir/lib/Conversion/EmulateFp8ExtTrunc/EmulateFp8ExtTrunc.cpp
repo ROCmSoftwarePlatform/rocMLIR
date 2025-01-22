@@ -49,8 +49,13 @@ struct EmulateFp8ExtTruncPass final
 };
 
 struct Fp8ExtToTableLookupPattern final : public OpConversionPattern<ExtFOp> {
-  using OpConversionPattern<ExtFOp>::OpConversionPattern;
-
+  bool hasF8ConversionInstrs = false;
+  bool hasOcpF8ConversionInstrs = false;
+  Fp8ExtToTableLookupPattern(MLIRContext *ctx, bool hasF8ConversionInstrs,
+                             bool hasOcpF8ConversionInstrs)
+      : OpConversionPattern<ExtFOp>::OpConversionPattern(ctx),
+        hasF8ConversionInstrs(hasF8ConversionInstrs),
+        hasOcpF8ConversionInstrs(hasOcpF8ConversionInstrs) {}
   LogicalResult match(ExtFOp op) const override;
   void rewrite(ExtFOp op, OpAdaptor adaptor,
                ConversionPatternRewriter &rewriter) const override;
@@ -61,16 +66,22 @@ struct Fp8TruncToCallPattern final : public OpConversionPattern<TruncFOp> {
   FlatSymbolRefAttr f8E5M2FNUZFunc;
   FlatSymbolRefAttr f8E4M3FNFunc; // OCP
   FlatSymbolRefAttr f8E5M2Func;   // OCP
+  bool hasF8ConversionInstrs = false;
+  bool hasOcpF8ConversionInstrs = false;
 
   // The functions are optional - if they aren't provided for a type (the null
   // attribute is sent in) the pattern will not apply.
   Fp8TruncToCallPattern(MLIRContext *ctx, FlatSymbolRefAttr f8E4M3FNUZFunc,
                         FlatSymbolRefAttr f8E5M2FNUZFunc,
                         FlatSymbolRefAttr f8E4M3FNFunc,
-                        FlatSymbolRefAttr f8E5M2Func)
+                        FlatSymbolRefAttr f8E5M2Func,
+                        bool hasF8ConversionInstrs,
+                        bool hasOcpF8ConversionInstrs)
       : OpConversionPattern<TruncFOp>::OpConversionPattern(ctx),
         f8E4M3FNUZFunc(f8E4M3FNUZFunc), f8E5M2FNUZFunc(f8E5M2FNUZFunc),
-        f8E4M3FNFunc(f8E4M3FNFunc), f8E5M2Func(f8E5M2Func) {}
+        f8E4M3FNFunc(f8E4M3FNFunc), f8E5M2Func(f8E5M2Func),
+        hasF8ConversionInstrs(hasF8ConversionInstrs),
+        hasOcpF8ConversionInstrs(hasOcpF8ConversionInstrs) {}
 
   LogicalResult match(TruncFOp op) const override;
   void rewrite(TruncFOp op, OpAdaptor adaptor,
@@ -83,16 +94,31 @@ static bool isFp8(Type t) {
          t.isFloat8E4M3FNUZ();
 }
 
-static LogicalResult canBeConverted(Type t) {
-  if (!isFp8(getElementTypeOrSelf(t)))
+static bool isNanooF8(Type t) {
+  return t.isFloat8E5M2FNUZ() || t.isFloat8E4M3FNUZ();
+}
+
+static bool isOcpF8(Type t) { return t.isFloat8E5M2() || t.isFloat8E4M3FN(); }
+
+static LogicalResult canBeConverted(Type t, bool hasF8ConversionInstrs,
+                                    bool hasOcpF8ConversionInstrs) {
+  Type elemType = getElementTypeOrSelf(t);
+  if (!isFp8(elemType))
     return failure();
+  if (hasF8ConversionInstrs && isNanooF8(elemType)) {
+    return failure();
+  }
+  if (hasOcpF8ConversionInstrs && isOcpF8(elemType)) {
+    return failure();
+  }
   if (auto vecType = dyn_cast<VectorType>(t))
     return success(vecType.hasStaticShape());
   return success();
 }
 
 LogicalResult Fp8ExtToTableLookupPattern::match(ExtFOp op) const {
-  return canBeConverted(op.getIn().getType());
+  return canBeConverted(op.getIn().getType(), hasF8ConversionInstrs,
+                        hasOcpF8ConversionInstrs);
 }
 
 static Value getFloatValueTableFor(Type elementType, Operation *op,
@@ -629,7 +655,8 @@ makeOCPFp8TruncFunction(Location loc, FloatType outType, Operation *module) {
 }
 
 LogicalResult Fp8TruncToCallPattern::match(TruncFOp op) const {
-  if (failed(canBeConverted(op.getResult().getType())))
+  if (failed(canBeConverted(op.getResult().getType(), hasF8ConversionInstrs,
+                            hasOcpF8ConversionInstrs)))
     return failure();
   Type resType = getElementTypeOrSelf(op.getOut().getType());
   if (resType.isFloat8E4M3FNUZ() && !f8E4M3FNUZFunc)
@@ -705,11 +732,15 @@ void mlir::addEmulateFp8ExtTruncPatterns(RewritePatternSet &patterns,
                                          FlatSymbolRefAttr f8E4M3FNUZTruncFunc,
                                          FlatSymbolRefAttr f8E5M2FNUZTruncFunc,
                                          FlatSymbolRefAttr f8E4M3FNTruncFunc,
-                                         FlatSymbolRefAttr f8E5M2TruncFunc) {
-  patterns.add<Fp8ExtToTableLookupPattern>(patterns.getContext());
-  patterns.add<Fp8TruncToCallPattern>(patterns.getContext(),
-                                      f8E4M3FNUZTruncFunc, f8E5M2FNUZTruncFunc,
-                                      f8E4M3FNTruncFunc, f8E5M2TruncFunc);
+                                         FlatSymbolRefAttr f8E5M2TruncFunc,
+                                         bool hasF8ConversionInstrs,
+                                         bool hasOcpF8ConversionInstrs) {
+  patterns.add<Fp8ExtToTableLookupPattern>(
+      patterns.getContext(), hasF8ConversionInstrs, hasOcpF8ConversionInstrs);
+  patterns.add<Fp8TruncToCallPattern>(
+      patterns.getContext(), f8E4M3FNUZTruncFunc, f8E5M2FNUZTruncFunc,
+      f8E4M3FNTruncFunc, f8E5M2TruncFunc, hasF8ConversionInstrs,
+      hasOcpF8ConversionInstrs);
 }
 
 void EmulateFp8ExtTruncPass::runOnOperation() {
@@ -725,10 +756,13 @@ void EmulateFp8ExtTruncPass::runOnOperation() {
   ConversionTarget target(getContext());
   target.addLegalDialect<arith::ArithDialect, func::FuncDialect,
                          memref::MemRefDialect, vector::VectorDialect>();
-  target.addDynamicallyLegalOp<arith::ExtFOp>(
-      [](ExtFOp op) { return failed(canBeConverted(op.getIn().getType())); });
-  target.addDynamicallyLegalOp<arith::TruncFOp>([](TruncFOp op) {
-    return failed(canBeConverted(op.getOut().getType()));
+  target.addDynamicallyLegalOp<arith::ExtFOp>([this](ExtFOp op) {
+    return failed(canBeConverted(op.getIn().getType(), hasFp8ConversionInstrs,
+                                 hasOcpFp8ConversionInstrs));
+  });
+  target.addDynamicallyLegalOp<arith::TruncFOp>([this](TruncFOp op) {
+    return failed(canBeConverted(op.getOut().getType(), hasFp8ConversionInstrs,
+                                 hasOcpFp8ConversionInstrs));
   });
 
   FlatSymbolRefAttr f8E4M3FNUZTruncFunc = nullptr;
@@ -739,14 +773,18 @@ void EmulateFp8ExtTruncPass::runOnOperation() {
       f8E5M2Locs;
   op->walk([&](TruncFOp op) {
     Type outElemType = getElementTypeOrSelf(op.getOut().getType());
-    if (outElemType.isFloat8E4M3FNUZ())
-      f8E4M3FNUZLocs.push_back(op->getLoc());
-    else if (outElemType.isFloat8E5M2FNUZ())
-      f8E5M2FNUZLocs.push_back(op->getLoc());
-    else if (outElemType.isFloat8E4M3FN())
-      f8E4M3FNLocs.push_back(op->getLoc());
-    else if (outElemType.isFloat8E5M2())
-      f8E5M2Locs.push_back(op->getLoc());
+    if (!hasFp8ConversionInstrs) {
+      if (outElemType.isFloat8E4M3FNUZ())
+        f8E4M3FNUZLocs.push_back(op->getLoc());
+      else if (outElemType.isFloat8E5M2FNUZ())
+        f8E5M2FNUZLocs.push_back(op->getLoc());
+    }
+    if (!hasOcpFp8ConversionInstrs) {
+      if (outElemType.isFloat8E4M3FN())
+        f8E4M3FNLocs.push_back(op->getLoc());
+      else if (outElemType.isFloat8E5M2())
+        f8E5M2Locs.push_back(op->getLoc());
+    }
   });
 
   if (!f8E4M3FNUZLocs.empty()) {
@@ -767,9 +805,9 @@ void EmulateFp8ExtTruncPass::runOnOperation() {
   }
 
   RewritePatternSet rewrites(ctx);
-  addEmulateFp8ExtTruncPatterns(rewrites, f8E4M3FNUZTruncFunc,
-                                f8E5M2FNUZTruncFunc, f8E4M3FNTruncFunc,
-                                f8E5M2TruncFunc);
+  addEmulateFp8ExtTruncPatterns(
+      rewrites, f8E4M3FNUZTruncFunc, f8E5M2FNUZTruncFunc, f8E4M3FNTruncFunc,
+      f8E5M2TruncFunc, hasFp8ConversionInstrs, hasOcpFp8ConversionInstrs);
   if (failed(applyPartialConversion(op, target, std::move(rewrites))))
     return signalPassFailure();
 }

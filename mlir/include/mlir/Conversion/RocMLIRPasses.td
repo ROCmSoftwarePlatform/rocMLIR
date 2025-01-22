@@ -130,6 +130,12 @@ def EmulateFp8ExtTruncPass : Pass<"emulate-fp8-ext-trunc"> {
     "memref::MemRefDialect",
     "vector::VectorDialect",
   ];
+  let options = [
+    Option<"hasFp8ConversionInstrs", "f8-conversion-instrs", "bool", /*default=*/"false",
+           "if the chip has fp8 Nanoo to fp32 conversion instructions or not">,
+    Option<"hasOcpFp8ConversionInstrs", "ocpf8-conversion-instrs", "bool", /*default=*/"false",
+           "if the chip has OCP fp8 to fp32 conversion instructions or not">,
+  ];
 }
 
 #endif // ROCMLIR_CONVERSION_PASSES
