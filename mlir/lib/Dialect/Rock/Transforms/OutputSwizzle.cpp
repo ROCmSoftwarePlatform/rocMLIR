@@ -175,6 +175,7 @@ struct ThreadwiseWriteAllRewritePattern
     int64_t nVectorLen = nVectorRes.max;
     int64_t dim = (mVectorLen > nVectorLen) ? dimensionM : dimensionN;
     int64_t vectorLen = std::max(mVectorLen, nVectorLen);
+    int64_t elementsWrittenPerThread = math_util::gcd(dataPerThread, vectorLen);
 
     // check vectorization of iter in the original map to decide if we run the
     // pass
@@ -191,16 +192,16 @@ struct ThreadwiseWriteAllRewritePattern
         destView.getDefiningOp());
     int64_t originalVectorLen = vectorRes.max;
 
-    if (vectorLen <= originalVectorLen) {
+    if (elementsWrittenPerThread <= originalVectorLen) {
       LLVM_DEBUG(llvm::dbgs()
                  << "Original vectorization of 'iter' is " << originalVectorLen
-                 << ", the output swizzle could achieve " << vectorLen
+                 << ", the output swizzle could achieve " << elementsWrittenPerThread
                  << ", skipping swizzle\n");
       return success();
     }
     LLVM_DEBUG(llvm::dbgs()
                << "Original vectorization of 'iter' is " << originalVectorLen
-               << ", the output swizzle could achieve " << vectorLen
+               << ", the output swizzle could achieve " << elementsWrittenPerThread
                << ", performing swizzle\n");
 
     // Get current workitem ID.
@@ -242,7 +243,6 @@ struct ThreadwiseWriteAllRewritePattern
                                    /*useIndexDiffs=*/useIndexDiffs);
 
     // Load from LDS to registers.
-    int64_t elementsWrittenPerThread = math_util::gcd(dataPerThread, vectorLen);
     int64_t iter = dataPerThread / elementsWrittenPerThread;
     LLVM_DEBUG(llvm::dbgs()
                << "blockSize: " << blockSize
