@@ -579,6 +579,8 @@ LogicalResult getTuningProblemStr(rock::AttentionOp attnOp,
     problemOS << "f32" << sep;
   } else if (elemTypeQ.isF16()) {
     problemOS << "f16" << sep;
+  } else if (elemTypeQ.isBF16()) {
+    problemOS << "bf16" << sep;
   } else if (elemTypeQ.isInteger(8)) {
     problemOS << "i8" << sep;
   } else {
