@@ -153,7 +153,7 @@ public:
   // Drop `dim`, making it disappear from the underlying view.
   void ignore(StringRef dim);
 
-  // Defines dimension(s) that have a constan value and some particular size.
+  // Defines dimension(s) that have a constant value and some particular size.
   void constDim(StringRef lowerName, uint32_t lowerDim, int64_t constantVal,
                 int64_t lowerSize);
   void constDim(ArrayRef<StringRef> lowerNames, ArrayRef<uint32_t> lowerDims,
@@ -166,6 +166,8 @@ public:
 
   void merge(ArrayRef<StringRef> lowerNames, ArrayRef<uint32_t> lowerDims,
              StringRef upperName, ArrayRef<int64_t> sizes);
+
+  void broadcast(ArrayRef<uint32_t> endDims, ArrayRef<int64_t> endSizes);
 
   // Map `name` to `name` % `length`.
   // This is implemented as a `Broadcast{length}` operation. The input dimension
@@ -184,7 +186,7 @@ protected:
 
 /// A wrapper around a TopDownTMBuilder that looks up end dimensions in a
 /// provided map, used for cases such as when merge()ing will create extra
-/// dimensions. This takes the builder by reference and does modefiations there
+/// dimensions. This takes the builder by reference and does modifications there
 /// and thus doesn't expose its own get() method. Everything is defined here
 /// to increase inlineability
 struct TopDownTMBottomDimsWrapper {

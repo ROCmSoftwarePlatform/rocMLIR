@@ -1382,6 +1382,7 @@ TransformMapAttr mlir::rock::invertTransformMap(
   }
 
   rock::TopDownTMBuilder transform(b, lowNames, lowShape, loc);
+  uint32_t currentDim = 0;
   for (auto tattr : transformMap.getOps()) {
     switch (tattr.getType()) {
     case rock::TransformType::PassThrough:
@@ -1390,9 +1391,11 @@ TransformMapAttr mlir::rock::invertTransformMap(
       break;
     case rock::TransformType::Pad:
     case rock::TransformType::Slice:
-    case rock::TransformType::Embed:
-    case rock::TransformType::Broadcast: // Unsupported
-      return rock::TransformMapAttr();
+    case rock::TransformType::Embed: // Unsupported
+      return TransformMapAttr();
+    case rock::TransformType::Broadcast:
+      transform.broadcast({currentDim}, {tattr.getLowerDims()[0]});
+      break;
     case rock::TransformType::AddDim:
       if (tattr.getParams()[0] != 1)
         // AddDim of length > 1 has no coherent inverse.
@@ -1417,6 +1420,7 @@ TransformMapAttr mlir::rock::invertTransformMap(
                         tattr.getLowerNames(), tattr.getParams());
       break;
     }
+    currentDim++;
   }
 
   return transform.get();

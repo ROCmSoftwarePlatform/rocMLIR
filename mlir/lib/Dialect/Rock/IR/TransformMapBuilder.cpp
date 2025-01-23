@@ -595,6 +595,24 @@ void TopDownTMBuilder::merge(ArrayRef<StringRef> lowerNames,
                lowerDims);
 }
 
+void TopDownTMBuilder::broadcast(ArrayRef<uint32_t> endDims,
+                                 ArrayRef<int64_t> endSizes) {
+  SmallVector<int64_t, 8> params;
+  SmallVector<StringRef, 8> lowerNames;
+  SmallVector<StringRef, 8> upperNames;
+  for (auto tuple : llvm::zip(endDims, endSizes)) {
+    uint32_t dim = std::get<0>(tuple);
+    int64_t size = std::get<1>(tuple);
+    auto name = startName(dim);
+    params.push_back(startSize(dim));
+    lowerNames.push_back(name);
+    upperNames.push_back(name);
+    defineDim(name, dim, size);
+  }
+  addTransform(TransformType::Broadcast, params, upperNames, endDims,
+               lowerNames, endDims);
+}
+
 void TopDownTMBuilder::takeRemainder(StringRef name, int64_t length) {
   assert(length > 0 && "Remainder can't be zero");
   uint32_t dim = startIndex(name);
