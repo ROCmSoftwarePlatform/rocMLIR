@@ -185,11 +185,6 @@ GemmRewritePattern::matchAndRewrite(GemmOp op, GemmOpAdaptor adaptor,
 
   const int64_t splitKFactor = op.getParams()->getSplitKFactor();
   if (splitKFactor > 1) {
-    if (!bitEnumContainsAll(op.getFeatures(), GemmFeatures::atomic_add)) {
-      return op.emitError(
-          "Split-K `GemmOp` requires support of `atomic_add` hardware feature");
-    }
-
     auto maybeSplitk =
         arrangeSplitKTransform(rw, op, loc, splitKFactor, a, b, c);
     if (failed(maybeSplitk))
