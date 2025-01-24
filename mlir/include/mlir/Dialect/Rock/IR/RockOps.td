@@ -324,7 +324,7 @@ def Rock_TransformOp :
     Results<(outs AnyShaped:$output)> {
   let summary = "Tensor transformation";
   let description = [{
-    Create a viee `output` of the tensor `input` with the same element type
+    Create a veiw `output` of the tensor `input` with the same element type
     such that, when the coordinates used to index into `output` are passed through
     the coordinate transformations `transforms` from left to right,
     they become coordinates into the `input` tensor.

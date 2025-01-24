@@ -1365,7 +1365,10 @@ mlir::rock::makeLinalgGenericWithIdentityAffMaps(PatternRewriter &b,
 
 TransformMapAttr mlir::rock::invertTransformMap(
     OpBuilder &b, mlir::rock::TransformMapAttr transformMap, Location loc) {
+  llvm::errs() << "input map:\n";
+  llvm::errs() << transformMap << "\n";
   ArrayRef<int64_t> lowShape = transformMap.getLowerBounds();
+  ArrayRef<int64_t> highShape = transformMap.getUpperBounds();
   llvm::IndexedMap<StringRef> lowNamesMap;
   if (!lowShape.empty())
     lowNamesMap.grow(lowShape.size() - 1); // grow takes largest index;
@@ -1392,9 +1395,14 @@ TransformMapAttr mlir::rock::invertTransformMap(
     case rock::TransformType::Slice:
     case rock::TransformType::Embed: // Unsupported
       return TransformMapAttr();
-    case rock::TransformType::Broadcast:
-      transform.broadcast(tattr.getLowerDims(), tattr.getParams());
+    case rock::TransformType::Broadcast: {
+      SmallVector<int64_t> lengths;
+      for (const auto highDim : tattr.getUpperDims()) {
+        lengths.push_back(highShape[highDim]);
+      }
+      transform.broadcast(tattr.getUpperDims(), lengths);
       break;
+    }
     case rock::TransformType::AddDim:
       if (tattr.getParams()[0] != 1)
         // AddDim of length > 1 has no coherent inverse.
@@ -1420,7 +1428,8 @@ TransformMapAttr mlir::rock::invertTransformMap(
       break;
     }
   }
-
+  llvm::errs() << "output map:\n";
+  llvm::errs() << transform.get() << "\n";
   return transform.get();
 }
 
