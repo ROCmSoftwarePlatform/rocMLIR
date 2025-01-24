@@ -37,7 +37,7 @@ bool validOperationGemmOut(Operation &op) {
 }
 
 LogicalResult mlir::rock::checkValidOutputFusion(
-    linalg::GenericOp genericOp, Value gemmResult,
+    linalg::GenericOp genericOp, Value gemmResult, GemmFeatures features,
     SmallVector<std::tuple<Operation *, int>> &adds) {
   /* We can only fuse:
   - add/sub gemmResult, otherTensor (which will be converted to add gemmResult,
@@ -51,8 +51,17 @@ LogicalResult mlir::rock::checkValidOutputFusion(
   auto outputs = genericOp.getOutputs();
   assert(outputs.size() == 1);
   auto outElementType = cast<ShapedType>(outputs[0].getType()).getElementType();
-  if (!outElementType.isF32() && !outElementType.isF16()) {
-    // Split-K currently supports only f32/f16 element types
+  
+  // Split-K currently supports only f32/f16 element types
+  if(!isa<Float32Type, Float16Type>(outElementType))
+    return failure();
+  
+  if(isa<Float32Type>(outElementType) && !bitEnumContainsAll(features,
+                              GemmFeatures::atomic_add)) {
+    return failure();
+  }
+  if(isa<Float16Type>(outElementType) && !bitEnumContainsAll(features,
+                              GemmFeatures::atomic_add_f16)) {
     return failure();
   }
 
@@ -105,7 +114,7 @@ LogicalResult mlir::rock::checkValidOutputFusion(
   return success();
 }
 
-LogicalResult mlir::rock::testFusionLegality(func::FuncOp func) {
+LogicalResult mlir::rock::testFusionLegalitySplitK(func::FuncOp func) {
   auto analysis = BufferDependencyAnalysis(func.getOperation());
   const auto &readersTable = analysis.getReadersTable();
   const auto &writersTable = analysis.getWritersTable();
@@ -152,7 +161,7 @@ LogicalResult mlir::rock::testFusionLegality(func::FuncOp func) {
         for (auto genericOp : genericOps) {
           SmallVector<std::tuple<Operation *, int>> adds;
           if (failed(
-                  checkValidOutputFusion(genericOp, maybeAlloc.value(), adds)))
+                  checkValidOutputFusion(genericOp, maybeAlloc.value(), gemmOp.getGemmFeatures(), adds)))
             return WalkResult::interrupt();
         }
 
@@ -162,12 +171,12 @@ LogicalResult mlir::rock::testFusionLegality(func::FuncOp func) {
   return success(!walkResult.wasInterrupted());
 }
 
-LogicalResult mlir::rock::testFusionLegality(ModuleOp mod) {
+LogicalResult mlir::rock::testFusionLegalitySplitK(ModuleOp mod) {
   auto funcs = mod.getOps<func::FuncOp>();
   assert(std::distance(funcs.begin(), funcs.end()) &&
          "expected ModuleOp containing a single func::FuncOp");
   func::FuncOp func = *(funcs.begin());
-  return testFusionLegality(func);
+  return testFusionLegalitySplitK(func);
 }
 
 LogicalResult mlir::rock::testFusionLegalityReduce(func::FuncOp func) {

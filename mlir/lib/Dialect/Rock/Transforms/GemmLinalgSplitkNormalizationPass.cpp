@@ -21,6 +21,7 @@
 //
 //===-----------------------------------------------------===//
 #include "mlir/Analysis/BufferDependencyAnalysis.h"
+#include "mlir/Dialect/Rock/IR/RockTypes.h"
 #include "mlir/Dialect/Rock/utility/builderUtils.h"
 #include "mlir/Dialect/Rock/utility/fusionUtils.h"
 #include "mlir/Dialect/Rock/utility/loweringUtils.h"
@@ -53,9 +54,10 @@ class RockGemmLinalgSplitkNormalizationPass
 static LogicalResult divideAddBySplitkFactor(linalg::GenericOp genericOp,
                                              Value gemmResult,
                                              int64_t splitKFactor,
+                                             GemmFeatures features,
                                              IRRewriter &b) {
   SmallVector<std::tuple<Operation *, int>> adds;
-  if (failed(checkValidOutputFusion(genericOp, gemmResult, adds)))
+  if (failed(checkValidOutputFusion(genericOp, gemmResult, features, adds)))
     return failure();
 
   for (auto [arithOp, gemmOutIndex] : adds) {
@@ -99,6 +101,7 @@ rewriteLinalgForSplitK(func::FuncOp &func,
   for (linalg::GenericOp op : genericOps) {
     SmallVector<Value> gemmOut;
     SmallVector<int64_t> splitKFactors;
+    SmallVector<GemmFeatures> features;
     for (auto operand : op->getOperands()) {
       auto genericOpInputAlloc = findMemrefAlloc(operand);
       if (succeeded(genericOpInputAlloc)) {
@@ -111,6 +114,7 @@ rewriteLinalgForSplitK(func::FuncOp &func,
               if (splitKFactor > 1) {
                 gemmOut.push_back(genericOpInputAlloc.value());
                 splitKFactors.push_back(splitKFactor);
+                features.push_back(gemm.getFeatures());
               }
             }
           }
@@ -119,11 +123,12 @@ rewriteLinalgForSplitK(func::FuncOp &func,
     }
     assert(gemmOut.empty() || gemmOut.size() == 1);
     assert(gemmOut.size() == splitKFactors.size());
+    assert(gemmOut.size() == features.size());
     if (gemmOut.size() == 1) {
       LLVM_DEBUG(llvm::dbgs()
                  << "Found linalg::GenericOp that reads GEMM output, let's "
                     "modify it if it has addf and/or subf\n");
-      if (failed(divideAddBySplitkFactor(op, gemmOut[0], splitKFactors[0],
+      if (failed(divideAddBySplitkFactor(op, gemmOut[0], splitKFactors[0], features[0],
                                          rewriter)))
         return failure();
     } else {
