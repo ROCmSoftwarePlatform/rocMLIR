@@ -1,6 +1,6 @@
  // RUN: rocmlir-driver -host-pipeline partition,highlevel -targets gfx90a:sramecc+:xnack- %s | rocmlir-gen -ph -print-results -verifier clone -fut forward - | rocmlir-driver -host-pipeline mhal -kernel-pipeline full | FileCheck %s
 
-// CHECK: mhal.launch @forward__part_19
+// CHECK: func.func @forward(%arg0: memref<1x3x224x224xf32>, %arg1: memref<1x1000xf32>)
 
  module attributes {torch.debug_module_name = "ResNet"} {
   func.func @forward(%arg0: tensor<1x3x224x224xf32>) -> tensor<1x1000xf32> {

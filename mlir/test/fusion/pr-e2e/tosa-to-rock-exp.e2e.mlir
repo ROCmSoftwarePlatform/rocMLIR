@@ -2,8 +2,7 @@
 // ALLOW_RETRIES: 2
 
 module {
-// CLONE: RMS = {{.*}}e-09
-// CLONE: [1 0 0]
+// CLONE: [1 1 1]
   func.func @test_fusion(%arg0: tensor<128x32x32x8xf32>, %arg1: tensor<128x3x3x8xf32>) -> tensor<128x30x30x128xf32> {
 
     %zero = arith.constant dense<0.0> : tensor<128xf32>

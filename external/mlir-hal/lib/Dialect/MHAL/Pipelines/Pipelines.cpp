@@ -63,20 +63,11 @@ using namespace mlir;
 
 void mhal::buildGraphPipeline(OpPassManager &pm,
                               const mhal::GraphOptions &options) {
-  // TOSA partitioning pass
   // make 'kernel' funcs with tosa dataflow
-  /* mlir-opt --tosa-make-broadcastable
-         --tosa-partition --mhal-annotate-access-kinds
+  /* mlir-opt --tosa-make-broadcastable --mhal-annotate-access-kinds
    */
   pm.addNestedPass<func::FuncOp>(tosa::createTosaMakeBroadcastablePass());
   pm.addNestedPass<func::FuncOp>(createCanonicalizerPass());
-
-  SmallVector<std::string, 4> anchors{"tosa.conv2d", "tosa.depthwise_conv2d",
-                                      "tosa.matmul"};
-  tosa::TosaPartitionOptions opts;
-  opts.anchorOps = std::move(anchors);
-  opts.trailingOnly = true;
-  pm.addPass(tosa::createTosaPartition(opts));
   pm.addPass(mhal::createMHALAnnotateAccessKindsPass());
 
   /* mlir-opt --duplicate-function-elimination
@@ -171,8 +162,7 @@ void mhal::buildRunnerPipeline(OpPassManager &pm,
 void mhal::registerPipelines() {
   PassPipelineRegistration<mhal::GraphOptions>(
       "mhal-graph-pipeline",
-      "The MHAL graph pipeline optimizes and partitions TOSA dataflow "
-      "graphs.",
+      "The MHAL graph pipeline optimizes TOSA dataflow graphs.",
       buildGraphPipeline);
   PassPipelineRegistration<mhal::PackageOptions>(
       "mhal-package-pipeline",
