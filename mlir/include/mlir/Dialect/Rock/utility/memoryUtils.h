@@ -43,6 +43,12 @@ FailureOr<LDSInfo> createInterferenceGraph(func::FuncOp &func);
 /// Utility function to compute allocated LDS after LDS reuse pass.
 FailureOr<int64_t> getAllocatedLDSAfterReuse(func::FuncOp &func);
 
+// TODO: define
+bool hasPrivateMemoryAddressSpace(MemRefType type);
+
+// TODO: define
+bool hasGlobalMemoryAddressSpace(MemRefType type);
+
 } // namespace rock
 } // namespace mlir
 

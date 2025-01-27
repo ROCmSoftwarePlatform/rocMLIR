@@ -277,5 +277,22 @@ FailureOr<int64_t> getAllocatedLDSAfterReuse(func::FuncOp &func) {
   return requiredMemory;
 }
 
+bool hasPrivateMemoryAddressSpace(MemRefType type) {
+  Attribute memorySpace = type.getMemorySpace();
+  if (!memorySpace)
+    return false;
+  if (auto gpuAttr = llvm::dyn_cast<gpu::AddressSpaceAttr>(memorySpace)) {
+
+    return gpuAttr.getValue() == gpu::AddressSpace::Private;
+  }
+  return false;
+}
+
+bool hasGlobalMemoryAddressSpace(MemRefType type) {
+  return !gpu::GPUDialect::hasWorkgroupMemoryAddressSpace(type) &&
+         !hasPrivateMemoryAddressSpace(type);
+}
+
+
 } // namespace rock
 } // namespace mlir

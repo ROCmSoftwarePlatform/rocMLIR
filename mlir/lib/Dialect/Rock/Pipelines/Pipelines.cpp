@@ -184,6 +184,7 @@ void rock::buildKernelPipeline(OpPassManager &pm,
     // The second pass might use less LDS because it happens after
     // fusions and they might truncate the result.
     funcPm.addPass(rock::createRockOutputSwizzlePass());
+    funcPm.addPass(rock::createRockHoistOutputFusionLoadsPass());
     funcPm.addPass(rock::createRockReuseLDSPass());
 
     // rock lowering for reductions

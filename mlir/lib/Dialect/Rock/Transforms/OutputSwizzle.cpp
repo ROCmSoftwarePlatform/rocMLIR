@@ -64,22 +64,6 @@ struct RockOutputSwizzlePass
 };
 } // end anonymous namespace
 
-static bool hasPrivateMemoryAddressSpace(MemRefType type) {
-  Attribute memorySpace = type.getMemorySpace();
-  if (!memorySpace)
-    return false;
-  if (auto gpuAttr = llvm::dyn_cast<gpu::AddressSpaceAttr>(memorySpace)) {
-
-    return gpuAttr.getValue() == AddressSpace::Private;
-  }
-  return false;
-}
-
-static bool hasGlobalMemoryAddressSpace(MemRefType type) {
-  return !gpu::GPUDialect::hasWorkgroupMemoryAddressSpace(type) &&
-         !hasPrivateMemoryAddressSpace(type);
-}
-
 static std::optional<std::tuple<int64_t, int64_t, ArrayAttr>>
 getIdToLDS(ThreadwiseWriteAllOp &op, OpBuilder &b) {
   ArrayAttr srcTransform = op.getExtraViewsAttr();
