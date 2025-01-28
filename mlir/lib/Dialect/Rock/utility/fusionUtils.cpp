@@ -8,26 +8,117 @@
 
 #include "mlir/Dialect/Rock/utility/fusionUtils.h"
 #include "mlir/Analysis/BufferDependencyAnalysis.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Rock/IR/Rock.h"
+#include "mlir/Dialect/Rock/IR/RockTypes.h"
 #include "mlir/Dialect/Rock/Tuning/GridwiseGemmParams.h"
+#include "mlir/Dialect/Rock/utility/builderUtils.h"
 #include "mlir/Dialect/Rock/utility/loweringUtils.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Pass/AnalysisManager.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/LogicalResult.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/LogicalResult.h"
 
 using namespace mlir;
 using namespace mlir::rock;
+using namespace arith;
+
+bool validOperationGemmOut(Operation &op) {
+  return isa<MulFOp, DivFOp, AddFOp, SubFOp, SIToFPOp, UIToFPOp, NegFOp,
+             ExtUIOp, ExtSIOp, ExtFOp, TruncFOp, TruncIOp>(op);
+}
+
+LogicalResult mlir::rock::checkValidOutputFusion(
+    linalg::GenericOp genericOp, Value gemmResult,
+    SmallVector<std::tuple<Operation *, int>> &adds) {
+  /* We can only fuse:
+  - add/sub gemmResult, otherTensor (which will be converted to add gemmResult,
+  otherTensor/splitKFactor)
+  - add/sub gemmResult, gemmResult
+  - mul/div gemmResult, otherTensor
+  - neg
+  - type conversion functions
+  Where gemmResult != otherTensor for all cases.
+  */
+  auto outputs = genericOp.getOutputs();
+  assert(outputs.size() == 1);
+  auto outElementType = cast<ShapedType>(outputs[0].getType()).getElementType();
+  if (!outElementType.isF32() && !outElementType.isF16()) {
+    // Split-K currently supports only f32/f16 element types
+    return failure();
+  }
+
+  // find tensor index
+  int tensorIndex = -1;
+  for (int i = 0; i < static_cast<int>(genericOp->getNumOperands()); ++i) {
+    auto genericOpInputAlloc = findMemrefAlloc(genericOp->getOperand(i));
+    if (llvm::succeeded(genericOpInputAlloc) &&
+        genericOpInputAlloc->getMemref() == gemmResult)
+      tensorIndex = i;
+  }
+  if (tensorIndex == -1)
+    return failure();
+
+  llvm::DenseSet<Value> derivedGemmResult;
+  Block &body = genericOp.getRegion().front();
+  derivedGemmResult.insert(body.getArgument(tensorIndex));
+
+  for (Operation &nestedOp : body.without_terminator()) {
+    // check if any operand is derived from the GEMM result
+    int numGemmResults = 0;
+    for (Value operand : nestedOp.getOperands()) {
+      if (derivedGemmResult.contains(operand))
+        ++numGemmResults;
+    }
+    if (numGemmResults > 0) {
+      // check it's a valid operation
+      if (!validOperationGemmOut(nestedOp)) {
+        return failure();
+      }
+
+      if (isa<MulFOp, DivFOp>(nestedOp) && numGemmResults > 1) {
+        // gemmOut^2 is not allowed
+        return failure();
+      }
+
+      // save add and sub ops to modify them: divide by splitKFactor
+      // if both operands come from gemmOut, no need to modify anything
+      if (isa<AddFOp, SubFOp>(nestedOp) && numGemmResults == 1) {
+        int index = derivedGemmResult.contains(nestedOp.getOperand(0)) ? 0 : 1;
+        adds.push_back(std::make_tuple(&nestedOp, index));
+      }
+
+      // add the op results to our tracked set since they're derived from the
+      // GEMM result
+      for (Value result : nestedOp.getResults())
+        derivedGemmResult.insert(result);
+    }
+  }
+  return success();
+}
 
 LogicalResult mlir::rock::testFusionLegality(func::FuncOp func) {
   auto analysis = BufferDependencyAnalysis(func.getOperation());
   const auto &readersTable = analysis.getReadersTable();
   const auto &writersTable = analysis.getWritersTable();
+
+  // can't fuse reduce_max with split-k
+  WalkResult reduceMaxRes = func.walk([](ReduceOp reduceOp) -> WalkResult {
+    if (reduceOp.getReduceMethod() == ReduceMethod::Max)
+      return WalkResult::interrupt();
+
+    return WalkResult::advance();
+  });
+  if (reduceMaxRes.wasInterrupted())
+    return failure();
 
   WalkResult walkResult =
       func.walk([&](rock::RockGemmWrapperInterface gemmOp) -> WalkResult {
@@ -37,11 +128,13 @@ LogicalResult mlir::rock::testFusionLegality(func::FuncOp func) {
           return WalkResult::advance();
         }
 
-        // make sure that no `linalg::GenericOp` reads from a gemm output
+        // save all `linalg::GenericOp` that read from a gemm output
+        SmallVector<linalg::GenericOp> genericOps;
         if (readersTable.contains(*maybeAlloc)) {
           for (OpOperand *op : readersTable.at(*maybeAlloc)) {
             if (isa<linalg::GenericOp>(op->getOwner())) {
-              return WalkResult::interrupt();
+              genericOps.push_back(
+                  llvm::dyn_cast<linalg::GenericOp>(op->getOwner()));
             }
           }
         }
@@ -53,6 +146,14 @@ LogicalResult mlir::rock::testFusionLegality(func::FuncOp func) {
               return WalkResult::interrupt();
             }
           }
+        }
+
+        // check if generic ops are valid fusions
+        for (auto genericOp : genericOps) {
+          SmallVector<std::tuple<Operation *, int>> adds;
+          if (failed(
+                  checkValidOutputFusion(genericOp, maybeAlloc.value(), adds)))
+            return WalkResult::interrupt();
         }
 
         return WalkResult::advance();
@@ -67,4 +168,41 @@ LogicalResult mlir::rock::testFusionLegality(ModuleOp mod) {
          "expected ModuleOp containing a single func::FuncOp");
   func::FuncOp func = *(funcs.begin());
   return testFusionLegality(func);
+}
+
+LogicalResult mlir::rock::testFusionLegalityReduce(func::FuncOp func) {
+  WalkResult walkResult = func.walk([&](rock::ReduceOp reduceOp) -> WalkResult {
+    auto outElemType = reduceOp.getOut().getType().getElementType();
+    if (reduceOp.getReduceMethod() == ReduceMethod::Max) {
+      if (!isa<Float32Type>(outElemType))
+        return WalkResult::interrupt();
+
+      if (!bitEnumContainsAll(reduceOp.getFeatures(),
+                              GemmFeatures::atomic_fmax_f32))
+        return WalkResult::interrupt();
+    } else {
+      if (!isa<Float32Type, Float16Type>(outElemType))
+        return WalkResult::interrupt();
+
+      if (isa<Float32Type>(outElemType) &&
+          !bitEnumContainsAll(reduceOp.getFeatures(), GemmFeatures::atomic_add))
+        return WalkResult::interrupt();
+
+      if (isa<Float16Type>(outElemType) &&
+          !bitEnumContainsAll(reduceOp.getFeatures(),
+                              GemmFeatures::atomic_add_f16))
+        return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+
+  return success(!walkResult.wasInterrupted());
+}
+
+LogicalResult mlir::rock::testFusionLegalityReduce(ModuleOp mod) {
+  auto funcs = mod.getOps<func::FuncOp>();
+  assert(std::distance(funcs.begin(), funcs.end()) &&
+         "expected ModuleOp containing a single func::FuncOp");
+  func::FuncOp func = *(funcs.begin());
+  return testFusionLegalityReduce(func);
 }

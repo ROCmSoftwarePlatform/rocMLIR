@@ -579,6 +579,8 @@ LogicalResult getTuningProblemStr(rock::AttentionOp attnOp,
     problemOS << "f32" << sep;
   } else if (elemTypeQ.isF16()) {
     problemOS << "f16" << sep;
+  } else if (elemTypeQ.isBF16()) {
+    problemOS << "bf16" << sep;
   } else if (elemTypeQ.isInteger(8)) {
     problemOS << "i8" << sep;
   } else {
@@ -1008,10 +1010,10 @@ RocmlirSplitKSelectionLikelihood isSplitKFaster(int64_t gDim, int64_t mDim,
 }
 
 bool isModuleFusible(ModuleOp module, StringRef perfConfig) {
-  if (!rock::isSplitKRequested(module, perfConfig)) {
-    return true;
-  }
-  return succeeded(rock::testFusionLegality(module));
+  bool fusible = succeeded(rock::testFusionLegalityReduce(module));
+  if (!rock::isSplitKRequested(module, perfConfig))
+    return fusible;
+  return fusible && succeeded(rock::testFusionLegality(module));
 }
 
 } // namespace rock

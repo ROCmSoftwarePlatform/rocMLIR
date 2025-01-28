@@ -30,6 +30,7 @@ if (ROCMLIR_DRIVER_PR_E2E_TEST_ENABLED)
     PrResnet50
     PrAttentionF32
     PrAttentionF16
+    PrAttentionBF16
     PrAttentionI8
     PrGemmSplitK
   )

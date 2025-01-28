@@ -567,16 +567,6 @@ struct TransposeRewritePattern : public OpRewritePattern<tosa::TransposeOp> {
                    preTpUnitDims.contains(newReassocIdx.back())) {
               newReassocIdx.pop_back();
             }
-            // Remove unit dims from smaller end of reassociation indices
-            // but we need at least one for the reassociation
-            // does so by reversing it.
-            llvm::reverse(newReassocIdx);
-            while (newReassocIdx.size() > 1 &&
-                   preTpUnitDims.contains(newReassocIdx.back())) {
-              newReassocIdx.pop_back();
-            }
-            // Needs to re-reverse it.
-            llvm::reverse(newReassocIdx);
             for (size_t i = 1; i < newReassocIdx.size(); i++) {
               if (newReassocIdx[i] - newReassocIdx[i - 1] != 1) {
                 return rewriter.notifyMatchFailure(
@@ -1198,8 +1188,9 @@ public:
                                 ConversionPatternRewriter &rw) const final {
     Type elementType =
         cast<ShapedType>(op.getInput().getType()).getElementType();
-    if (!elementType.isF32()) {
-      return rw.notifyMatchFailure(op, "We only support F32 reductions, yet.");
+    if (!elementType.isF32() && !elementType.isF16()) {
+      return rw.notifyMatchFailure(
+          op, "We only support F32 and F16 reductions, yet.");
     }
     Attribute outputInitVal = rw.getFloatAttr(elementType, 0.0000);
     return matchAndRewriteReductions(op, rock::ReduceMethod::Sum, outputInitVal,

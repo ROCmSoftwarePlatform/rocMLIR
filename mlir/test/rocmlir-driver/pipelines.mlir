@@ -16,6 +16,7 @@
 // GPU:Kernel pipeline:
 // GPU-NEXT:builtin.module(func.func(rock-affix-params{fallback=false},
 // GPU-NEXT:rock-conv-to-gemm,
+// GPU-NEXT:rock-gemm-linalg-splitk-normalization,
 // GPU-NEXT:rock-gemm-to-gridwise,
 // GPU-NEXT:rock-regularize,
 // GPU-NEXT:rock-shuffle-gemm-for-reductions,
@@ -49,7 +50,7 @@
 // BINARY-NEXT:f8E4M3FN,
 // BINARY-NEXT:f8E5M2} target-type=f32},
 // BINARY-NEXT:convert-arith-to-amdgpu{allow-packed-f16-round-to-zero=true chipset=gfx90a saturate-fp8-truncf=true},
-// BINARY-NEXT:emulate-fp8-ext-trunc,
+// BINARY-NEXT:emulate-fp8-ext-trunc{f8-conversion-instrs=false ocpf8-conversion-instrs=false},
 // BINARY-NEXT:expand-strided-metadata,
 // BINARY-NEXT:lower-affine,
 // BINARY-NEXT:convert-gpu-to-rocdl{chipset=gfx90a index-bitwidth=0 runtime=HIP use-bare-ptr-memref-call-conv=true},
@@ -59,7 +60,7 @@
 // BINARY-NEXT:rocdl-attach-target{O=3 abi=500 chip=gfx90a correct-sqrt=true daz=false fast=false features= finite-only=false  module= triple=amdgcn-amd-amdhsa unsafe-math=false wave64=true},
 // BINARY-NEXT:gpu-module-to-binary{format=fatbin  opts= section= toolkit=},
 // BINARY-NEXT:rock-check-residency,
-// BINARY-NEXT:emulate-fp8-ext-trunc)
+// BINARY-NEXT:emulate-fp8-ext-trunc{f8-conversion-instrs=false ocpf8-conversion-instrs=false})
 
 // BINARY_MI300:Kernel pipeline:
 // BINARY_MI300-NEXT:builtin.module(strip-debuginfo,
@@ -69,6 +70,7 @@
 // BINARY_MI300-NEXT:f8E4M3FN,
 // BINARY_MI300-NEXT:f8E5M2} target-type=f32},
 // BINARY_MI300-NEXT:convert-arith-to-amdgpu{allow-packed-f16-round-to-zero=true chipset=gfx940 saturate-fp8-truncf=true},
+// BINARY_MI300-NEXT:emulate-fp8-ext-trunc{f8-conversion-instrs=true ocpf8-conversion-instrs=false},
 // BINARY_MI300-NEXT:expand-strided-metadata,
 // BINARY_MI300-NEXT:lower-affine,
 // BINARY_MI300-NEXT:convert-gpu-to-rocdl{chipset=gfx940 index-bitwidth=0 runtime=HIP use-bare-ptr-memref-call-conv=true},
@@ -78,7 +80,7 @@
 // BINARY_MI300-NEXT:rocdl-attach-target{O=3 abi=500 chip=gfx940 correct-sqrt=true daz=false fast=false features= finite-only=false  module= triple=amdgcn-amd-amdhsa unsafe-math=false wave64=true},
 // BINARY_MI300-NEXT:gpu-module-to-binary{format=fatbin  opts= section= toolkit=},
 // BINARY_MI300-NEXT:rock-check-residency,
-// BINARY_MI300-NEXT:emulate-fp8-ext-trunc)
+// BINARY_MI300-NEXT:emulate-fp8-ext-trunc{f8-conversion-instrs=false ocpf8-conversion-instrs=false})
 
 // PARTITION:Partitioner pipeline:
 // PARTITION-NEXT:builtin.module(func.func(tosa-make-broadcastable),

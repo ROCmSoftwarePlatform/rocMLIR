@@ -152,6 +152,7 @@ void rock::buildKernelPipeline(OpPassManager &pm,
   funcPm.addPass(rock::createRockAffixTuningParametersPass(
       rock::RockAffixTuningParametersPassOptions{options.tuningFallback}));
   funcPm.addPass(rock::createRockConvToGemmPass());
+  funcPm.addPass(rock::createRockGemmLinalgSplitkNormalizationPass());
   funcPm.addPass(rock::createRockGemmToGridwisePass());
   funcPm.addPass(rock::createRockRegularizePass());
   funcPm.addPass(rock::createRockShuffleGemmForReductions());
@@ -239,8 +240,11 @@ void rock::buildBackendPipeline(OpPassManager &pm,
   arithOptions.allowPackedF16Rtz = true;
   arithOptions.saturateFP8Truncf = true;
   gpuPm.addPass(createArithToAMDGPUConversionPass(arithOptions));
-  if (!archInfo.hasFp8ConversionInstrs)
-    gpuPm.addPass(createEmulateFp8ExtTruncPass());
+  EmulateFp8ExtTruncPassOptions f8ConversionOptions;
+  f8ConversionOptions.hasFp8ConversionInstrs = archInfo.hasFp8ConversionInstrs;
+  f8ConversionOptions.hasOcpFp8ConversionInstrs =
+      archInfo.hasOcpFp8ConversionInstrs;
+  gpuPm.addPass(createEmulateFp8ExtTruncPass(f8ConversionOptions));
   gpuPm.addPass(memref::createExpandStridedMetadataPass());
   // We need to lower affine again, because the expand strided metadata pass
   // adds back affine.apply for memref.subview
