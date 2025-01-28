@@ -278,7 +278,7 @@ GemmRewritePattern::arrangeSplitKTransform(OpBuilder &builder, GemmOp op,
   Value matC = op.getC();
   auto func = llvm::cast<func::FuncOp>(op->getParentOp());
   FailureOr<SmallVector<BlockArgument>> args =
-      traceGemmOutputToArgs(matC, func, builder, bufferDeps);
+      traceGemmOutputToArgs(matC, func, bufferDeps);
   if (failed(args)) {
     return op->emitError("can't trace gemm output to output argument");
   }

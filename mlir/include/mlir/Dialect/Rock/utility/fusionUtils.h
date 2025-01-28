@@ -30,11 +30,11 @@ LogicalResult testFusionLegalitySplitK(func::FuncOp func);
 // the atomic operation is supported by the hardware.
 LogicalResult testFusionLegalityReduce(func::FuncOp func);
 
-// This is an overload of the `testFusionLegalitySplitK` which is more convenient
-// to use in CAPI. Given a `ModuleOp`, the function retrieve the embedded
-// `func:FuncOp` and calls the implementation `testFusionLegalitySplitK` (see above).
-// Note, this overloaded function assumes that `ModuleOp` contains
-// a single `func:FuncOp`
+// This is an overload of the `testFusionLegalitySplitK` which is more
+// convenient to use in CAPI. Given a `ModuleOp`, the function retrieve the
+// embedded `func:FuncOp` and calls the implementation
+// `testFusionLegalitySplitK` (see above). Note, this overloaded function
+// assumes that `ModuleOp` contains a single `func:FuncOp`
 LogicalResult testFusionLegalitySplitK(ModuleOp mod);
 
 // Same as above, overload of `testFusionLegalityReduce` for `ModuleOp`.
@@ -43,7 +43,8 @@ LogicalResult testFusionLegalityReduce(ModuleOp mod);
 // Checks whether the output fusion linalg::GenericOp is valid. Assuming a
 // split-k kernel.
 LogicalResult
-checkValidOutputFusion(linalg::GenericOp genericOp, Value gemmResult, GemmFeatures features,
+checkValidOutputFusion(linalg::GenericOp genericOp, Value gemmResult,
+                       GemmFeatures features,
                        SmallVector<std::tuple<Operation *, int>> &adds);
 
 } // end namespace rock

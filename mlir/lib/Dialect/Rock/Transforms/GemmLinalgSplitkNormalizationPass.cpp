@@ -128,8 +128,8 @@ rewriteLinalgForSplitK(func::FuncOp &func,
       LLVM_DEBUG(llvm::dbgs()
                  << "Found linalg::GenericOp that reads GEMM output, let's "
                     "modify it if it has addf and/or subf\n");
-      if (failed(divideAddBySplitkFactor(op, gemmOut[0], splitKFactors[0], features[0],
-                                         rewriter)))
+      if (failed(divideAddBySplitkFactor(op, gemmOut[0], splitKFactors[0],
+                                         features[0], rewriter)))
         return failure();
     } else {
       LLVM_DEBUG(llvm::dbgs() << "We didn't find any linalg::GenericOp that "

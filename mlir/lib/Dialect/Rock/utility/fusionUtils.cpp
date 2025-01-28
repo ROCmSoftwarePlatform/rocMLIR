@@ -36,6 +36,22 @@ bool validOperationGemmOut(Operation &op) {
              ExtUIOp, ExtSIOp, ExtFOp, TruncFOp, TruncIOp>(op);
 }
 
+static LogicalResult validOutput(Type outType, GemmFeatures features) {
+  // Split-K currently supports only f32/f16 element types
+  if (!isa<Float32Type, Float16Type>(outType))
+    return failure();
+
+  if (isa<Float32Type>(outType) &&
+      !bitEnumContainsAll(features, GemmFeatures::atomic_add)) {
+    return failure();
+  }
+  if (isa<Float16Type>(outType) &&
+      !bitEnumContainsAll(features, GemmFeatures::atomic_add_f16)) {
+    return failure();
+  }
+  return success();
+}
+
 LogicalResult mlir::rock::checkValidOutputFusion(
     linalg::GenericOp genericOp, Value gemmResult, GemmFeatures features,
     SmallVector<std::tuple<Operation *, int>> &adds) {
@@ -50,20 +66,6 @@ LogicalResult mlir::rock::checkValidOutputFusion(
   */
   auto outputs = genericOp.getOutputs();
   assert(outputs.size() == 1);
-  auto outElementType = cast<ShapedType>(outputs[0].getType()).getElementType();
-  
-  // Split-K currently supports only f32/f16 element types
-  if(!isa<Float32Type, Float16Type>(outElementType))
-    return failure();
-  
-  if(isa<Float32Type>(outElementType) && !bitEnumContainsAll(features,
-                              GemmFeatures::atomic_add)) {
-    return failure();
-  }
-  if(isa<Float16Type>(outElementType) && !bitEnumContainsAll(features,
-                              GemmFeatures::atomic_add_f16)) {
-    return failure();
-  }
 
   // find tensor index
   int tensorIndex = -1;
@@ -132,6 +134,22 @@ LogicalResult mlir::rock::testFusionLegalitySplitK(func::FuncOp func) {
   WalkResult walkResult =
       func.walk([&](rock::RockGemmWrapperInterface gemmOp) -> WalkResult {
         auto gemmResult = gemmOp.getOutArgument()->get();
+
+        auto maybeBlockArgs = traceGemmOutputToArgs(gemmResult, func, analysis);
+        if (failed(maybeBlockArgs))
+          return WalkResult::interrupt();
+
+        // here we check that the kernel outputs are supported by hardware
+        // atomic_add features some kernels output might come directly from GEMM
+        // without passing through linalg::genericop or rock::reduceop
+        auto blockArgs = maybeBlockArgs.value();
+        for (auto blockArg : blockArgs) {
+          auto outElementType =
+              cast<ShapedType>(blockArg.getType()).getElementType();
+          if (failed(validOutput(outElementType, gemmOp.getGemmFeatures())))
+            return WalkResult::interrupt();
+        }
+
         auto maybeAlloc = findMemrefAlloc(gemmResult);
         if (failed(maybeAlloc)) {
           return WalkResult::advance();
@@ -160,8 +178,8 @@ LogicalResult mlir::rock::testFusionLegalitySplitK(func::FuncOp func) {
         // check if generic ops are valid fusions
         for (auto genericOp : genericOps) {
           SmallVector<std::tuple<Operation *, int>> adds;
-          if (failed(
-                  checkValidOutputFusion(genericOp, maybeAlloc.value(), gemmOp.getGemmFeatures(), adds)))
+          if (failed(checkValidOutputFusion(genericOp, maybeAlloc.value(),
+                                            gemmOp.getGemmFeatures(), adds)))
             return WalkResult::interrupt();
         }
 

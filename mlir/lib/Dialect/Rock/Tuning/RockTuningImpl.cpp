@@ -164,7 +164,8 @@ computeOptimalSplitKFactors(GemmSize origGemmSize, int32_t gemmMPerBlock,
 static SmallVector<int64_t>
 computeOptimalSplitKFactors(RockGemmWrapperInterface gemmOp,
                             int32_t gemmMPerBlock, int32_t gemmNPerBlock,
-                            int32_t gemmKPerBlock, int32_t kPack, bool isSplitKFusible) {
+                            int32_t gemmKPerBlock, int32_t kPack,
+                            bool isSplitKFusible) {
   auto info = PopulateParamsInfo::fromOp(gemmOp);
   SmallVector<int64_t> splitKValues = {1};
   GemmFeatures currentFeatures = gemmOp.getGemmFeatures();
@@ -199,8 +200,7 @@ computeOptimalSplitKFactors(RockGemmWrapperInterface gemmOp,
 // If `kind` is Full, also filters out unlikely-to-be-good configurations.
 void createGemmTuningRangeBF(TuningParamSet *newSpace,
                              RockGemmWrapperInterface gemmOp,
-                             bool isSplitKFusible,
-                             TuningParamSetKind kind) {
+                             bool isSplitKFusible, TuningParamSetKind kind) {
   auto info = PopulateParamsInfo::fromOp(gemmOp);
 
   // blockSize M/block N/block K/block M/thread N/thread
@@ -328,7 +328,8 @@ void createGemmTuningRangeBF(TuningParamSet *newSpace,
           for (uint32_t gemmKPerBlock : validRangeGeneralGemmParams[3]) {
             for (uint32_t gemmMPerThread : validRangeGeneralGemmParams[4]) {
               auto optimalSplitKFactors = computeOptimalSplitKFactors(
-                  gemmOp, gemmMPerBlock, gemmNPerBlock, gemmKPerBlock, 1, isSplitKFusible);
+                  gemmOp, gemmMPerBlock, gemmNPerBlock, gemmKPerBlock, 1,
+                  isSplitKFusible);
               for (auto splitKFactor : optimalSplitKFactors) {
                 for (uint32_t gemmNPerThread : validRangeGeneralGemmParams[5]) {
                   InitParamsNonAccel gemmParams(
