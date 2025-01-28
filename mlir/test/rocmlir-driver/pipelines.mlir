@@ -85,9 +85,6 @@
 // PARTITION:Partitioner pipeline:
 // PARTITION-NEXT:builtin.module(func.func(tosa-make-broadcastable),
 // PARTITION-NEXT:func.func(canonicalize{  max-iterations=10 max-num-rewrites=-1 region-simplify=normal test-convergence=false top-down=true}),
-// PARTITION-NEXT:tosa-partition{anchor-ops={tosa.conv2d,
-// PARTITION-NEXT:tosa.depthwise_conv2d,
-// PARTITION-NEXT:tosa.matmul} partition-tag=kernel  trailing-only=true},
 // PARTITION-NEXT:func.func(mhal-annotate-access-kinds),
 // PARTITION-NEXT:duplicate-function-elimination,
 // PARTITION-NEXT:func.func(mhal-infer-graph),
