@@ -145,7 +145,8 @@ LogicalResult mlir::rock::testFusionLegalitySplitK(func::FuncOp func) {
         for (auto blockArg : blockArgs) {
           auto outElementType =
               cast<ShapedType>(blockArg.getType()).getElementType();
-          if (failed(validOutputAtomicAdd(outElementType, gemmOp.getGemmFeatures())))
+          if (failed(validOutputAtomicAdd(outElementType,
+                                          gemmOp.getGemmFeatures())))
             return WalkResult::interrupt();
         }
 
@@ -207,7 +208,7 @@ LogicalResult mlir::rock::testFusionLegalityReduce(func::FuncOp func) {
                               GemmFeatures::atomic_fmax_f32))
         return WalkResult::interrupt();
     } else {
-      if(failed(validOutputAtomicAdd(outElemType, reduceOp.getFeatures())))
+      if (failed(validOutputAtomicAdd(outElemType, reduceOp.getFeatures())))
         return WalkResult::interrupt();
     }
     return WalkResult::advance();
