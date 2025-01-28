@@ -57,7 +57,7 @@
 // BINARY-NEXT:cse,
 // BINARY-NEXT:rock-prepare-llvm)),
 // BINARY-NEXT:rocdl-attach-target{O=3 abi=500 chip=gfx90a correct-sqrt=true daz=false fast=false features= finite-only=false  module= triple=amdgcn-amd-amdhsa unsafe-math=false wave64=true},
-// BINARY-NEXT:gpu-module-to-binary{format=fatbin  opts= toolkit=},
+// BINARY-NEXT:gpu-module-to-binary{format=fatbin  opts= section= toolkit=},
 // BINARY-NEXT:rock-check-residency,
 // BINARY-NEXT:emulate-fp8-ext-trunc)
 
@@ -76,7 +76,7 @@
 // BINARY_MI300-NEXT:cse,
 // BINARY_MI300-NEXT:rock-prepare-llvm)),
 // BINARY_MI300-NEXT:rocdl-attach-target{O=3 abi=500 chip=gfx940 correct-sqrt=true daz=false fast=false features= finite-only=false  module= triple=amdgcn-amd-amdhsa unsafe-math=false wave64=true},
-// BINARY_MI300-NEXT:gpu-module-to-binary{format=fatbin  opts= toolkit=},
+// BINARY_MI300-NEXT:gpu-module-to-binary{format=fatbin  opts= section= toolkit=},
 // BINARY_MI300-NEXT:rock-check-residency,
 // BINARY_MI300-NEXT:emulate-fp8-ext-trunc)
 

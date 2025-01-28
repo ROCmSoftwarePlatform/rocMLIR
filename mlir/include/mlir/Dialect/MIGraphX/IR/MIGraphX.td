@@ -20,6 +20,8 @@ include "mlir/IR/EnumAttr.td"
 include "mlir/IR/OpBase.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 
+def Tosa_AccType : AnyTypeOf<[I<32>, I<48>, F16, F32]>;
+
 // Base class for MIGraphX dialect ops.
 class MIGraphX_Op<string mnemonic, list<Trait> traits = []> :
     Op<MIGraphX_Dialect, mnemonic, traits> {
@@ -315,6 +317,7 @@ class MIGraphX_ConvOpBase<string mnemonic, list<Type> inputTypes=[], list<Type> 
                          I64ArrayAttr:$stride,
                          I64ArrayAttr:$dilation,
                          I64Attr:$group,
+                         TypeAttrOf<Tosa_AccType>:$acc_type,
                          OptionalAttr<I64Attr>:$padding_mode,
                          OptionalAttr<StrAttr>:$perf_config);
 	  let results = (outs MIXRShapedOf<outputTypes>:$output);

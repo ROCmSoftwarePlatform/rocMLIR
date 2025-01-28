@@ -336,6 +336,8 @@ LogicalResult ConvConverter<ConvType>::matchAndRewrite(
   auto padAttr = cast<ArrayAttr>(op->getAttr("padding"));
   auto strideAttr = cast<ArrayAttr>(op->getAttr("stride"));
   auto dilationAttr = cast<ArrayAttr>(op->getAttr("dilation"));
+  //auto accTypeAttr = cast<TypeAttr>(op->getAttr("acc_type"));
+  //Type acc_type = getTypeConverter()->convertType(accTypeAttr.getValue());
   // MIGraphX padAttr is [hlow, wlow, hhigh, whigh] while TOSA padAttr
   // is [hlow, hhigh, wlow, whigh].
   SmallVector<int64_t> pads;
@@ -352,6 +354,7 @@ LogicalResult ConvConverter<ConvType>::matchAndRewrite(
   }
 
   int64_t group = op.getGroup();
+  auto accType = op.getAccTypeAttr();
 
   // convolution config attributes
 
@@ -371,6 +374,7 @@ LogicalResult ConvConverter<ConvType>::matchAndRewrite(
   cop->setAttr("stride", rewriter.getDenseI64ArrayAttr(strides));
   cop->setAttr("pad", rewriter.getDenseI64ArrayAttr(pads));
   cop->setAttr("group", rewriter.getI64IntegerAttr(group));
+  cop->setAttr("acc_type", accType);
 
   // Convert optional attributes
   if (auto attr = (*op).template getAttrOfType<StringAttr>("perf_config"))

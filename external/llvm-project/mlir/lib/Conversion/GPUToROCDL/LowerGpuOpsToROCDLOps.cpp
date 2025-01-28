@@ -44,6 +44,7 @@
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "llvm/Support/FormatVariadic.h"
+#include "mlir/Dialect/Vector/Transforms/VectorRewritePatterns.h"
 
 #include "../GPUCommon/GPUOpsLowering.h"
 #include "../GPUCommon/IndexIntrinsicsOpLowering.h"
@@ -295,6 +296,7 @@ struct LowerGpuOpsToROCDLOpsPass
     populateAMDGPUToROCDLConversionPatterns(converter, llvmPatterns,
                                             *maybeChipset);
     populateVectorToLLVMConversionPatterns(converter, llvmPatterns);
+    mlir::vector::populateVectorInsertExtractStridedSliceTransforms(llvmPatterns);
     populateMathToLLVMConversionPatterns(converter, llvmPatterns);
     cf::populateControlFlowToLLVMConversionPatterns(converter, llvmPatterns);
     cf::populateAssertToLLVMConversionPattern(converter, llvmPatterns);
@@ -335,7 +337,7 @@ void mlir::configureGpuToROCDLConversionLegality(ConversionTarget &target) {
   target.addIllegalOp<func::FuncOp>();
   target.addLegalDialect<::mlir::LLVM::LLVMDialect>();
   target.addLegalDialect<ROCDL::ROCDLDialect>();
-  target.addIllegalDialect<gpu::GPUDialect>();
+  target.addIllegalDialect<gpu::GPUDialect, vector::VectorDialect>();
   target.addIllegalOp<LLVM::CosOp, LLVM::ExpOp, LLVM::Exp2Op, LLVM::FCeilOp,
                       LLVM::FFloorOp, LLVM::FRemOp, LLVM::LogOp, LLVM::Log10Op,
                       LLVM::Log2Op, LLVM::PowOp, LLVM::SinOp>();

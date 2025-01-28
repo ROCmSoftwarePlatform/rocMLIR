@@ -8,7 +8,7 @@ module  {
     %0 = migraphx.literal (dense<3.000000e+00> : tensor<64x64x1x1xf32>) : <1x64x56x56xf32, 200704x3136x56x1>
     // CHECK: [[trIn:%.+]] = tosa.transpose {{.*}}[[inExp]]{{.*}} : (tensor<1x64x56x56xf32>, tensor<4xi32>) -> tensor<1x56x56x64xf32>
     // CHECK: [[conv:%.+]] = tosa.conv2d {{.*}}[[trIn]]
-    %1 = migraphx.convolution %arg0, %0 {dilation = [1, 1], group = 1 : i64, padding = [0, 0, 0, 0], padding_mode = 0 : i64, stride = [1, 1]} : <1x64x56x56xf32, 200704x3136x56x1>, <1x64x56x56xf32, 200704x3136x56x1> -> <1x64x56x56xf32, 200704x3136x56x1>
+    %1 = migraphx.convolution %arg0, %0 {acc_type = f32, dilation = [1, 1], group = 1 : i64, padding = [0, 0, 0, 0], padding_mode = 0 : i64, stride = [1, 1]} : <1x64x56x56xf32, 200704x3136x56x1>, <1x64x56x56xf32, 200704x3136x56x1> -> <1x64x56x56xf32, 200704x3136x56x1>
     // CHECK: [[trOut:%.+]] = tosa.transpose {{.*}}[[conv]]
     // CHECK: [[outFlat:%.+]] = tosa.reshape [[trOut]] {new_shape = array<i64: 200704>}
      return %1 : !migraphx.shaped<1x64x56x56xf32, 200704x3136x56x1>
@@ -37,7 +37,7 @@ func.func @convNHWC(%in: !migraphx.shaped<1x4x5x5xf32, 100x1x20x4>, %fil: !migra
   // CHECK: [[convFlat:%.+]] = tosa.reshape [[convTr2]]
   // CHECK-SAME: (tensor<1x3x3x7xf32>) -> tensor<63xf32>
   // CHECK: return [[convFlat]]
-  %out = migraphx.convolution %in, %fil {dilation = [1, 1], group = 1 : i64, padding = [0, 0, 0, 0], padding_mode = 0 : i64, stride = [1, 1]} : <1x4x5x5xf32, 100x1x20x4>, <7x4x3x3xf32, 36x1x12x4> -> <1x7x3x3xf32, 63x1x21x7>
+  %out = migraphx.convolution %in, %fil {acc_type = f32, dilation = [1, 1], group = 1 : i64, padding = [0, 0, 0, 0], padding_mode = 0 : i64, stride = [1, 1]} : <1x4x5x5xf32, 100x1x20x4>, <7x4x3x3xf32, 36x1x12x4> -> <1x7x3x3xf32, 63x1x21x7>
   func.return %out : !migraphx.shaped<1x7x3x3xf32, 63x1x21x7>
 }
 
@@ -172,7 +172,7 @@ func.func @conv3d_add(%arg0: !migraphx.shaped<2x4x2x2x2xf32, 0x1x0x0x0>, %arg1: 
   // CHECK: tosa.conv3d
   // CHECK-SAME: (tensor<2x5x5x5x3xf32>, tensor<4x2x2x2x3xf32>, tensor<4xf32>) -> tensor<2x2x2x2x4xf32>
   // CHECK-2: tosa.transpose
-  %0 = migraphx.convolution %arg1, %arg2 {dilation = [2, 2, 2], group = 1 : i64, padding = [0, 0, 0, 0, 0, 0], padding_mode = 0 : i64, stride = [2, 2, 2]} : <2x3x5x5x5xf32, 375x125x25x5x1>, <4x3x2x2x2xf32, 24x8x4x2x1> -> <2x4x2x2x2xf32, 32x8x4x2x1>
+  %0 = migraphx.convolution %arg1, %arg2 {acc_type = f32, dilation = [2, 2, 2], group = 1 : i64, padding = [0, 0, 0, 0, 0, 0], padding_mode = 0 : i64, stride = [2, 2, 2]} : <2x3x5x5x5xf32, 375x125x25x5x1>, <4x3x2x2x2xf32, 24x8x4x2x1> -> <2x4x2x2x2xf32, 32x8x4x2x1>
   %1 = migraphx.add %0, %arg0 : <2x4x2x2x2xf32, 32x8x4x2x1>, <2x4x2x2x2xf32, 0x1x0x0x0> -> <2x4x2x2x2xf32, 32x8x4x2x1>
   return %1 : !migraphx.shaped<2x4x2x2x2xf32, 32x8x4x2x1>
 }
@@ -182,10 +182,10 @@ func.func @conv3d_add(%arg0: !migraphx.shaped<2x4x2x2x2xf32, 0x1x0x0x0>, %arg1: 
 func.func @conv1d_add(%arg0: !migraphx.shaped<1x64x224xf32, 0x1x0>, %arg1: !migraphx.shaped<1x3x224xf32, 672x224x1>, %arg2: !migraphx.shaped<64x3x7xf32, 21x7x1>) -> !migraphx.shaped<1x64x224xf32, 14336x224x1> {
   // CHECK-COUNT-3: tosa.transpose
   // CHECK: tosa.conv2d
-  // CHECK-SAME: {dilation = array<i64: 1, 1>, group = 1 : i64, pad = array<i64: 3, 3, 0, 0>, stride = array<i64: 1, 1>} : (tensor<1x224x1x3xf32>, tensor<64x7x1x3xf32>, tensor<64xf32>) -> tensor<1x224x1x64xf32>
+  // CHECK-SAME: {acc_type = f32, dilation = array<i64: 1, 1>, group = 1 : i64, pad = array<i64: 3, 3, 0, 0>, stride = array<i64: 1, 1>} : (tensor<1x224x1x3xf32>, tensor<64x7x1x3xf32>, tensor<64xf32>) -> tensor<1x224x1x64xf32>
   // CHECK-2: tosa.transpose
   // CHECK: tosa.add
-  %0 = migraphx.convolution %arg1, %arg2 {dilation = [1], group = 1 : i64, padding = [3, 3], padding_mode = 0 : i64, stride = [1]} : <1x3x224xf32, 672x224x1>, <64x3x7xf32, 21x7x1> -> <1x64x224xf32, 14336x224x1>
+  %0 = migraphx.convolution %arg1, %arg2 {acc_type = f32, dilation = [1], group = 1 : i64, padding = [3, 3], padding_mode = 0 : i64, stride = [1]} : <1x3x224xf32, 672x224x1>, <64x3x7xf32, 21x7x1> -> <1x64x224xf32, 14336x224x1>
   %1 = migraphx.add %0, %arg0 : <1x64x224xf32, 14336x224x1>, <1x64x224xf32, 0x1x0> -> <1x64x224xf32, 14336x224x1>
   return %1 : !migraphx.shaped<1x64x224xf32, 14336x224x1>
 }
