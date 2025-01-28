@@ -207,7 +207,7 @@ LogicalResult checkLDSSize(StringAttr arch, int64_t ldsBytes);
 
 // Trace gemm output back to its function arguments
 FailureOr<SmallVector<BlockArgument>>
-traceGemmOutputToArgs(Value matC, func::FuncOp func, OpBuilder &builder,
+traceGemmOutputToArgs(Value matC, func::FuncOp func,
                       const BufferDependencyAnalysis &deps);
 
 } // end namespace rock

@@ -36,8 +36,24 @@ bool validOperationGemmOut(Operation &op) {
              ExtUIOp, ExtSIOp, ExtFOp, TruncFOp, TruncIOp>(op);
 }
 
+static LogicalResult validOutputAtomicAdd(Type outType, GemmFeatures features) {
+  // Split-K currently supports only f32/f16 element types
+  if (!isa<Float32Type, Float16Type>(outType))
+    return failure();
+
+  if (isa<Float32Type>(outType) &&
+      !bitEnumContainsAll(features, GemmFeatures::atomic_add)) {
+    return failure();
+  }
+  if (isa<Float16Type>(outType) &&
+      !bitEnumContainsAll(features, GemmFeatures::atomic_add_f16)) {
+    return failure();
+  }
+  return success();
+}
+
 LogicalResult mlir::rock::checkValidOutputFusion(
-    linalg::GenericOp genericOp, Value gemmResult,
+    linalg::GenericOp genericOp, Value gemmResult, GemmFeatures features,
     SmallVector<std::tuple<Operation *, int>> &adds) {
   /* We can only fuse:
   - add/sub gemmResult, otherTensor (which will be converted to add gemmResult,
@@ -50,11 +66,6 @@ LogicalResult mlir::rock::checkValidOutputFusion(
   */
   auto outputs = genericOp.getOutputs();
   assert(outputs.size() == 1);
-  auto outElementType = cast<ShapedType>(outputs[0].getType()).getElementType();
-  if (!outElementType.isF32() && !outElementType.isF16()) {
-    // Split-K currently supports only f32/f16 element types
-    return failure();
-  }
 
   // find tensor index
   int tensorIndex = -1;
@@ -105,7 +116,7 @@ LogicalResult mlir::rock::checkValidOutputFusion(
   return success();
 }
 
-LogicalResult mlir::rock::testFusionLegality(func::FuncOp func) {
+LogicalResult mlir::rock::testFusionLegalitySplitK(func::FuncOp func) {
   auto analysis = BufferDependencyAnalysis(func.getOperation());
   const auto &readersTable = analysis.getReadersTable();
   const auto &writersTable = analysis.getWritersTable();
@@ -123,6 +134,22 @@ LogicalResult mlir::rock::testFusionLegality(func::FuncOp func) {
   WalkResult walkResult =
       func.walk([&](rock::RockGemmWrapperInterface gemmOp) -> WalkResult {
         auto gemmResult = gemmOp.getOutArgument()->get();
+
+        auto maybeBlockArgs = traceGemmOutputToArgs(gemmResult, func, analysis);
+        if (failed(maybeBlockArgs))
+          return WalkResult::interrupt();
+
+        // Verify hardware compatibility (split-k) for kernel output.
+        // Checks if atomic_add operations are supported by the target hardware.
+        auto blockArgs = maybeBlockArgs.value();
+        for (auto blockArg : blockArgs) {
+          auto outElementType =
+              cast<ShapedType>(blockArg.getType()).getElementType();
+          if (failed(validOutputAtomicAdd(outElementType,
+                                          gemmOp.getGemmFeatures())))
+            return WalkResult::interrupt();
+        }
+
         auto maybeAlloc = findMemrefAlloc(gemmResult);
         if (failed(maybeAlloc)) {
           return WalkResult::advance();
@@ -151,8 +178,8 @@ LogicalResult mlir::rock::testFusionLegality(func::FuncOp func) {
         // check if generic ops are valid fusions
         for (auto genericOp : genericOps) {
           SmallVector<std::tuple<Operation *, int>> adds;
-          if (failed(
-                  checkValidOutputFusion(genericOp, maybeAlloc.value(), adds)))
+          if (failed(checkValidOutputFusion(genericOp, maybeAlloc.value(),
+                                            gemmOp.getGemmFeatures(), adds)))
             return WalkResult::interrupt();
         }
 
@@ -162,12 +189,12 @@ LogicalResult mlir::rock::testFusionLegality(func::FuncOp func) {
   return success(!walkResult.wasInterrupted());
 }
 
-LogicalResult mlir::rock::testFusionLegality(ModuleOp mod) {
+LogicalResult mlir::rock::testFusionLegalitySplitK(ModuleOp mod) {
   auto funcs = mod.getOps<func::FuncOp>();
   assert(std::distance(funcs.begin(), funcs.end()) &&
          "expected ModuleOp containing a single func::FuncOp");
   func::FuncOp func = *(funcs.begin());
-  return testFusionLegality(func);
+  return testFusionLegalitySplitK(func);
 }
 
 LogicalResult mlir::rock::testFusionLegalityReduce(func::FuncOp func) {
@@ -181,16 +208,7 @@ LogicalResult mlir::rock::testFusionLegalityReduce(func::FuncOp func) {
                               GemmFeatures::atomic_fmax_f32))
         return WalkResult::interrupt();
     } else {
-      if (!isa<Float32Type, Float16Type>(outElemType))
-        return WalkResult::interrupt();
-
-      if (isa<Float32Type>(outElemType) &&
-          !bitEnumContainsAll(reduceOp.getFeatures(), GemmFeatures::atomic_add))
-        return WalkResult::interrupt();
-
-      if (isa<Float16Type>(outElemType) &&
-          !bitEnumContainsAll(reduceOp.getFeatures(),
-                              GemmFeatures::atomic_add_f16))
+      if (failed(validOutputAtomicAdd(outElemType, reduceOp.getFeatures())))
         return WalkResult::interrupt();
     }
     return WalkResult::advance();
