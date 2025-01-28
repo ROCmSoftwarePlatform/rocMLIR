@@ -20,11 +20,7 @@ enum RocmlirTuningParamSetKind {
   RocmlirTuningParamSetKindFull = 1,
   RocmlirTuningParamSetKindExhaustive = 2
 };
-typedef enum RocmlirTuningParamSetKind RocmlirTuningParamSetKind;
-
-// TODO (ravil): document
-enum RocmlirSplitKSelectionLikelihood { never = 0, maybe = 1, always = 2 };
-typedef enum RocmlirSplitKSelectionLikelihood RocmlirSplitKSelectionLikelihood;
+using RocmlirTuningParamSetKind = enum RocmlirTuningParamSetKind;
 
 #ifdef __cplusplus
 }

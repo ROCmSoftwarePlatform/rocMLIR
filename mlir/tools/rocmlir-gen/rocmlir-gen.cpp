@@ -483,12 +483,6 @@ static llvm::cl::opt<bool>
                           llvm::cl::value_desc("To populate default values"),
                           llvm::cl::init(false));
 
-static llvm::cl::opt<bool> emitSplitKSelectionLikelihood(
-    "emit-split-k-selection-likelihood",
-    llvm::cl::desc(
-        "Print SplitK selection likelihood for the specified kernel"),
-    llvm::cl::init(false));
-
 static llvm::cl::opt<std::string> emitModuleFusabilityForPerfConfig(
     "emit-module-fusibility-for",
     llvm::cl::desc("Print whether module is fusible given a perf config"),
@@ -4088,30 +4082,6 @@ int main(int argc, char **argv) {
     populateCloneHarnessLogic(*module);
   } else if (!hasUserKernel) {
     generateKernel(&context, genParams, *module);
-  }
-
-  if (emitSplitKSelectionLikelihood) {
-    module->walk([](rock::RockGemmWrapperInterface gemmOp) {
-      const int32_t numCU = rock::lookupArchInfo(gemmOp.getArch()).minNumCU;
-      const rock::GemmSize gemmSize = gemmOp.getGemmSize();
-      const auto likelihood = rock::isSplitKFaster(
-          gemmSize.g, gemmSize.m, gemmSize.n, gemmSize.k, numCU);
-      switch (likelihood) {
-      case RocmlirSplitKSelectionLikelihood::always: {
-        llvm::outs() << "always\n";
-        break;
-      }
-      case RocmlirSplitKSelectionLikelihood::maybe: {
-        llvm::outs() << "maybe\n";
-        break;
-      }
-      case RocmlirSplitKSelectionLikelihood::never: {
-        llvm::outs() << "never\n";
-        break;
-      }
-      }
-    });
-    return 0;
   }
 
   if (!emitModuleFusabilityForPerfConfig.empty()) {

@@ -144,20 +144,6 @@ MLIR_CAPI_EXPORTED size_t mlirRockTuningGetKey(MlirModule module, char *buf,
 }
 
 MLIR_CAPI_EXPORTED
-enum RocmlirSplitKSelectionLikelihood
-mlirIsSplitKFaster(int64_t gDim, int64_t mDim, int64_t nDim, int64_t kDim,
-                   int64_t numCUs, RocmlirTuningParamSetKind tuningLevel) {
-  if (tuningLevel ==
-      RocmlirTuningParamSetKind::RocmlirTuningParamSetKindQuick) {
-    // Note, we return `never` because we don't provide splitK values
-    // in the case of `Quick` tuning. If we decide to remove this restriction
-    // in the future, we must remove this if-statement
-    return RocmlirSplitKSelectionLikelihood::never;
-  }
-  return rock::isSplitKFaster(gDim, mDim, nDim, kDim, numCUs);
-}
-
-MLIR_CAPI_EXPORTED
 bool mlirIsModuleFusible(MlirModule module, MlirStringRef perfStr) {
   auto mod = unwrap(module);
   StringRef perfConfig = unwrap(perfStr);

@@ -133,13 +133,6 @@ bool mlirRockTuningSetFromTable(MlirRockTuningTable perfTable,
 MLIR_CAPI_EXPORTED size_t mlirRockTuningGetKey(MlirModule module, char *buf,
                                                size_t bufLen);
 
-// Returns likelihood of the Split-K scheme being faster than Data Parallel
-// GEMM implementation
-MLIR_CAPI_EXPORTED
-enum RocmlirSplitKSelectionLikelihood
-mlirIsSplitKFaster(int64_t gDim, int64_t mDim, int64_t nDim, int64_t kDim,
-                   int64_t numCUs, RocmlirTuningParamSetKind tuningLevel);
-
 // Checks whether input or output fusion is legal or not
 MLIR_CAPI_EXPORTED
 bool mlirIsModuleFusible(MlirModule module, MlirStringRef perfStr);

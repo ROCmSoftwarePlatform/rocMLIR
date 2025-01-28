@@ -160,25 +160,6 @@ struct ProgramOptions {
   bool useElementwiseOp;
 };
 
-std::ostream &operator<<(std::ostream &stream,
-                         RocmlirSplitKSelectionLikelihood likelihood) {
-  switch (likelihood) {
-  case RocmlirSplitKSelectionLikelihood::always: {
-    stream << "always";
-    break;
-  }
-  case RocmlirSplitKSelectionLikelihood::maybe: {
-    stream << "maybe";
-    break;
-  }
-  case RocmlirSplitKSelectionLikelihood::never: {
-    stream << "never";
-    break;
-  }
-  }
-  return stream;
-}
-
 template <typename T>
 std::ostream &operator<<(std::ostream &stream, const std::vector<T> &vec) {
   for (size_t i = 0; i < vec.size(); ++i) {
@@ -316,17 +297,6 @@ static bool constructAndTraverseIr(MlirContext ctx,
   std::cout.setf(std::ios_base::fixed, std::ios_base::floatfield);
   std::cout.setf(std::ios::boolalpha);
   std::cout.precision(2);
-
-  // descr -> splitK hint using only high-level information
-  const int64_t numCUs =
-      mlir::rock::lookupArchInfo(options.targetArch).minNumCU;
-  constexpr int64_t numGroups = 1;
-  RocmlirSplitKSelectionLikelihood likelihood = mlirIsSplitKFaster(
-      numGroups, options.M, options.N, options.K, numCUs, options.tuningLevel);
-  std::cout << "splitk selection likelihood: " << likelihood << std::endl;
-  // M1024_N1024_K64: splitk selection likelihood: maybe
-  // M8192_N8192_K64: splitk selection likelihood: never
-  // M64_N64_K1024: splitk selection likelihood: always
 
   auto moduleOp = CRAIIWrapper<MlirModule>(
       makeAndDumpMIXR<ElementType>(ctx, location, options));
