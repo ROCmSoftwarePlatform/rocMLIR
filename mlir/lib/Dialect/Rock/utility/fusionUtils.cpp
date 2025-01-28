@@ -139,9 +139,8 @@ LogicalResult mlir::rock::testFusionLegalitySplitK(func::FuncOp func) {
         if (failed(maybeBlockArgs))
           return WalkResult::interrupt();
 
-        // here we check that the kernel outputs are supported by hardware
-        // atomic_add features some kernels output might come directly from GEMM
-        // without passing through linalg::genericop or rock::reduceop
+        // Verify hardware compatibility (split-k) for kernel output.
+        // Checks if atomic_add operations are supported by the target hardware.
         auto blockArgs = maybeBlockArgs.value();
         for (auto blockArg : blockArgs) {
           auto outElementType =
