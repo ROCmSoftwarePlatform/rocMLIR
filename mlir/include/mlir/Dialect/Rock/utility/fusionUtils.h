@@ -43,7 +43,8 @@ LogicalResult testFusionLegalityReduce(ModuleOp mod);
 // Checks whether the output fusion linalg::GenericOp is valid. Assuming a
 // split-k kernel.
 LogicalResult
-checkValidOutputFusion(linalg::GenericOp genericOp, Value gemmResult, GemmFeatures features,
+checkValidOutputFusion(linalg::GenericOp genericOp, Value gemmResult,
+                       GemmFeatures features,
                        SmallVector<std::tuple<Operation *, int>> &adds);
 
 } // end namespace rock

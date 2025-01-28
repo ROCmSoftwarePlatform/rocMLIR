@@ -95,20 +95,23 @@ void createAttnTuningRangeBF(TuningParamSet *newSpace, AttentionOp attnOp,
   }
 }
 
-std::tuple<double, int32_t> computeWorkImbalance(GemmSize gemmSize, int32_t gemmMPerBlock,
-                            int32_t gemmNPerBlock, int32_t gemmMNPerWave, uint32_t minNumWaves,
-                            int32_t splitKFactor = 1) {
+std::tuple<double, int32_t>
+computeWorkImbalance(GemmSize gemmSize, int32_t gemmMPerBlock,
+                     int32_t gemmNPerBlock, int32_t gemmMNPerWave,
+                     uint32_t minNumWaves, int32_t splitKFactor = 1) {
   const auto numMTiles = (gemmSize.m + gemmMPerBlock - 1) / gemmMPerBlock;
   const auto numNTiles = (gemmSize.n + gemmNPerBlock - 1) / gemmNPerBlock;
 
   const int32_t totalNumWorkGroups =
       gemmSize.g * numMTiles * numNTiles * splitKFactor;
-  const int32_t numWavesPerBlock = gemmMPerBlock * gemmNPerBlock / gemmMNPerWave;
+  const int32_t numWavesPerBlock =
+      gemmMPerBlock * gemmNPerBlock / gemmMNPerWave;
   const int32_t totalNumWavesI64 = totalNumWorkGroups * numWavesPerBlock;
   const double totalNumWaves = static_cast<double>(totalNumWavesI64);
   const double maxWavesPerCU = std::ceil(totalNumWaves / minNumWaves);
   // imbalances = max. CU work / average work per CU
-  return std::make_tuple((maxWavesPerCU * minNumWaves) / totalNumWaves, totalNumWavesI64);
+  return std::make_tuple((maxWavesPerCU * minNumWaves) / totalNumWaves,
+                         totalNumWavesI64);
 }
 
 int32_t computeNumberKIterations(GemmSize gemmSize, int32_t gemmKPerBlock) {
@@ -116,18 +119,21 @@ int32_t computeNumberKIterations(GemmSize gemmSize, int32_t gemmKPerBlock) {
   return numKIters;
 }
 
-static int64_t
-computeOptimalSplitKFactor(GemmSize origGemmSize, int32_t gemmMPerBlock,
-                            int32_t gemmNPerBlock, int32_t gemmKPerBlock, int32_t gemmMNPerWave,
-                            int32_t kPack, uint32_t numCUs, int32_t numEUPerCU) {
-  const int32_t minNumWaves = numCUs*numEUPerCU;
+static int64_t computeOptimalSplitKFactor(GemmSize origGemmSize,
+                                          int32_t gemmMPerBlock,
+                                          int32_t gemmNPerBlock,
+                                          int32_t gemmKPerBlock,
+                                          int32_t gemmMNPerWave, int32_t kPack,
+                                          uint32_t numCUs, int32_t numEUPerCU) {
+  const int32_t minNumWaves = numCUs * numEUPerCU;
   const InitParams params{gemmMPerBlock, gemmNPerBlock, gemmKPerBlock};
   const GemmSize gemmSize =
       calculatePaddedGemmSize(params, origGemmSize, kPack);
   int32_t numKIters = computeNumberKIterations(gemmSize, gemmKPerBlock);
-  
-  const auto [dataParallelGemmImbalance, dataParallelTotalNumWaves] = computeWorkImbalance(
-      gemmSize, gemmMPerBlock, gemmNPerBlock, gemmMNPerWave, minNumWaves);
+
+  const auto [dataParallelGemmImbalance, dataParallelTotalNumWaves] =
+      computeWorkImbalance(gemmSize, gemmMPerBlock, gemmNPerBlock,
+                           gemmMNPerWave, minNumWaves);
 
   constexpr double imbalaceThreshold = 1.2;
   if (dataParallelGemmImbalance < imbalaceThreshold) {
@@ -135,18 +141,19 @@ computeOptimalSplitKFactor(GemmSize origGemmSize, int32_t gemmMPerBlock,
   }
 
   // heuristic for GEMMs with enough waves
-  double occupancy = static_cast<double>(dataParallelTotalNumWaves) / static_cast<double>(minNumWaves);
+  double occupancy = static_cast<double>(dataParallelTotalNumWaves) /
+                     static_cast<double>(minNumWaves);
   const double minOccupancy = 1.3;
-  if(occupancy > minOccupancy) {
+  if (occupancy > minOccupancy) {
     return 1;
   }
 
   // heuristic to determine splitKFactors
   SmallVector<int64_t> splitKFactorsInitial = {3, 4, 5, 6, 7, 8, 9, 10, 11};
   SmallVector<int64_t> splitKFactorsHeuristic;
-  for(int64_t splitKFactor : splitKFactorsInitial) {
+  for (int64_t splitKFactor : splitKFactorsInitial) {
     // check if number of K iterations is divisble by split-k factor
-    if(numKIters >= splitKFactor && numKIters % splitKFactor == 0)
+    if (numKIters >= splitKFactor && numKIters % splitKFactor == 0)
       splitKFactorsHeuristic.push_back(splitKFactor);
   }
 
@@ -158,7 +165,8 @@ computeOptimalSplitKFactor(GemmSize origGemmSize, int32_t gemmMPerBlock,
   constexpr double minGain = 1.30;
   for (int64_t splitKFactor : splitKFactorsHeuristic) {
     const auto [imbalance, totalNumWaves] =
-        computeWorkImbalance(gemmSize, gemmMPerBlock, gemmNPerBlock, gemmMNPerWave, minNumWaves, splitKFactor);
+        computeWorkImbalance(gemmSize, gemmMPerBlock, gemmNPerBlock,
+                             gemmMNPerWave, minNumWaves, splitKFactor);
     const auto gain = dataParallelGemmImbalance / imbalance;
     if (gain > minGain)
       factors.emplace_back(LocalData{splitKFactor, imbalance});
@@ -176,10 +184,12 @@ computeOptimalSplitKFactor(GemmSize origGemmSize, int32_t gemmMPerBlock,
   return factors[0].splitKValue;
 }
 
-static int64_t
-computeOptimalSplitKFactor(RockGemmWrapperInterface gemmOp,
-                            int32_t gemmMPerBlock, int32_t gemmNPerBlock,
-                            int32_t gemmKPerBlock, int32_t gemmMNPerWave, int32_t kPack, bool isSplitKFusible) {
+static int64_t computeOptimalSplitKFactor(RockGemmWrapperInterface gemmOp,
+                                          int32_t gemmMPerBlock,
+                                          int32_t gemmNPerBlock,
+                                          int32_t gemmKPerBlock,
+                                          int32_t gemmMNPerWave, int32_t kPack,
+                                          bool isSplitKFusible) {
   auto info = PopulateParamsInfo::fromOp(gemmOp);
   GemmFeatures currentFeatures = gemmOp.getGemmFeatures();
   // We dont enable split-k on Navi yet because they dont
@@ -203,10 +213,10 @@ computeOptimalSplitKFactor(RockGemmWrapperInterface gemmOp,
   if (gemmOp.getNumCU().has_value()) {
     numCUs = gemmOp.getNumCU().value();
   }
-  
-  return computeOptimalSplitKFactor(info.gemmSize, gemmMPerBlock,
-                                     gemmNPerBlock, gemmKPerBlock, gemmMNPerWave, kPack,
-                                     numCUs, numEUPerCU);
+
+  return computeOptimalSplitKFactor(info.gemmSize, gemmMPerBlock, gemmNPerBlock,
+                                    gemmKPerBlock, gemmMNPerWave, kPack, numCUs,
+                                    numEUPerCU);
 }
 
 // The full space is a brute-force search starting with the configs that have
@@ -215,8 +225,7 @@ computeOptimalSplitKFactor(RockGemmWrapperInterface gemmOp,
 // If `kind` is Full, also filters out unlikely-to-be-good configurations.
 void createGemmTuningRangeBF(TuningParamSet *newSpace,
                              RockGemmWrapperInterface gemmOp,
-                             bool isSplitKFusible,
-                             TuningParamSetKind kind) {
+                             bool isSplitKFusible, TuningParamSetKind kind) {
   auto info = PopulateParamsInfo::fromOp(gemmOp);
 
   // blockSize M/block N/block K/block M/thread N/thread
@@ -272,20 +281,19 @@ void createGemmTuningRangeBF(TuningParamSet *newSpace,
             for (uint32_t gemmMnPerXdl : xdlopsParams[4]) {
               for (uint32_t gemmKPack : xdlopsParams[5]) {
                 auto splitKFactor = computeOptimalSplitKFactor(
-                    gemmOp, gemmMPerBlock, gemmNPerBlock, gemmKPerBlock, gemmMPerWave*gemmMnPerXdl,
-                    gemmKPack, isSplitKFusible);
+                    gemmOp, gemmMPerBlock, gemmNPerBlock, gemmKPerBlock,
+                    gemmMPerWave * gemmMnPerXdl, gemmKPack, isSplitKFusible);
                 for (uint32_t forceUnroll : xdlopsParams[6]) {
-                  InitParamsAccel gemmParams(gemmMPerBlock, gemmNPerBlock,
-                                              gemmKPerBlock, gemmMPerWave,
-                                              gemmMnPerXdl, gemmKPack,
-                                              splitKFactor, forceUnroll, true);
+                  InitParamsAccel gemmParams(
+                      gemmMPerBlock, gemmNPerBlock, gemmKPerBlock, gemmMPerWave,
+                      gemmMnPerXdl, gemmKPack, splitKFactor, forceUnroll, true);
                   if (gemmMPerBlock >= gemmMPerWave &&
                       gemmNPerBlock >= gemmMnPerXdl) {
-                    if (succeeded(tuningInfo.paramsProbablyValid(
-                            b, info, gemmParams)) &&
+                    if (succeeded(tuningInfo.paramsProbablyValid(b, info,
+                                                                 gemmParams)) &&
                         (kind == TuningParamSetKind::Exhaustive ||
-                          succeeded(
-                              tuningInfo.couldBePerformant(info, gemmParams))))
+                         succeeded(
+                             tuningInfo.couldBePerformant(info, gemmParams))))
                       newSpace->tuningRange.push_back(
                           cast<RockTuningParamAttrInterface>(
                               tuningInfo.getGemmParamsAttr(b, gemmParams)));
@@ -309,18 +317,17 @@ void createGemmTuningRangeBF(TuningParamSet *newSpace,
             for (uint32_t gemmNPerWave : wmmaParams[4]) {
               for (uint32_t gemmKPack : wmmaParams[5]) {
                 auto splitKFactor = computeOptimalSplitKFactor(
-                    gemmOp, gemmMPerBlock, gemmNPerBlock, gemmKPerBlock, gemmMPerWave*gemmNPerWave,
-                    gemmKPack, isSplitKFusible);
+                    gemmOp, gemmMPerBlock, gemmNPerBlock, gemmKPerBlock,
+                    gemmMPerWave * gemmNPerWave, gemmKPack, isSplitKFusible);
                 for (uint32_t forceUnroll : wmmaParams[6]) {
-                  InitParamsAccel gemmParams(gemmMPerBlock, gemmNPerBlock,
-                                              gemmKPerBlock, gemmMPerWave,
-                                              gemmNPerWave, gemmKPack,
-                                              splitKFactor, forceUnroll, true);
+                  InitParamsAccel gemmParams(
+                      gemmMPerBlock, gemmNPerBlock, gemmKPerBlock, gemmMPerWave,
+                      gemmNPerWave, gemmKPack, splitKFactor, forceUnroll, true);
                   if (succeeded(tuningInfo.paramsProbablyValid(b, info,
-                                                                gemmParams)) &&
+                                                               gemmParams)) &&
                       (kind == TuningParamSetKind::Exhaustive ||
-                        succeeded(
-                            tuningInfo.couldBePerformant(info, gemmParams))))
+                       succeeded(
+                           tuningInfo.couldBePerformant(info, gemmParams))))
                     newSpace->tuningRange.push_back(
                         cast<RockTuningParamAttrInterface>(
                             tuningInfo.getGemmParamsAttr(b, gemmParams)));
@@ -339,20 +346,21 @@ void createGemmTuningRangeBF(TuningParamSet *newSpace,
       int32_t numWavesPerBlock = blockSize / archInfo.waveSize;
       for (uint32_t gemmMPerBlock : validRangeGeneralGemmParams[1]) {
         for (uint32_t gemmNPerBlock : validRangeGeneralGemmParams[2]) {
-          int32_t gemmMNPerWave = gemmNPerBlock*gemmMPerBlock / numWavesPerBlock;
+          int32_t gemmMNPerWave =
+              gemmNPerBlock * gemmMPerBlock / numWavesPerBlock;
           for (uint32_t gemmKPerBlock : validRangeGeneralGemmParams[3]) {
             for (uint32_t gemmMPerThread : validRangeGeneralGemmParams[4]) {
               auto splitKFactor = computeOptimalSplitKFactor(
-                  gemmOp, gemmMPerBlock, gemmNPerBlock, gemmKPerBlock, gemmMNPerWave, 1, isSplitKFusible);
+                  gemmOp, gemmMPerBlock, gemmNPerBlock, gemmKPerBlock,
+                  gemmMNPerWave, 1, isSplitKFusible);
               for (uint32_t gemmNPerThread : validRangeGeneralGemmParams[5]) {
                 InitParamsNonAccel gemmParams(
                     blockSize, gemmMPerBlock, gemmNPerBlock, gemmKPerBlock,
                     gemmMPerThread, gemmNPerThread, splitKFactor);
-                if (succeeded(tuningInfo.paramsProbablyValid(b, info,
-                                                              gemmParams)) &&
+                if (succeeded(
+                        tuningInfo.paramsProbablyValid(b, info, gemmParams)) &&
                     (kind == TuningParamSetKind::Exhaustive ||
-                      succeeded(
-                          tuningInfo.couldBePerformant(info, gemmParams))))
+                     succeeded(tuningInfo.couldBePerformant(info, gemmParams))))
                   newSpace->tuningRange.push_back(
                       cast<RockTuningParamAttrInterface>(
                           tuningInfo.getGemmParamsAttr(b, gemmParams)));

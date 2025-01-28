@@ -51,17 +51,17 @@ LogicalResult mlir::rock::checkValidOutputFusion(
   auto outputs = genericOp.getOutputs();
   assert(outputs.size() == 1);
   auto outElementType = cast<ShapedType>(outputs[0].getType()).getElementType();
-  
+
   // Split-K currently supports only f32/f16 element types
-  if(!isa<Float32Type, Float16Type>(outElementType))
+  if (!isa<Float32Type, Float16Type>(outElementType))
     return failure();
-  
-  if(isa<Float32Type>(outElementType) && !bitEnumContainsAll(features,
-                              GemmFeatures::atomic_add)) {
+
+  if (isa<Float32Type>(outElementType) &&
+      !bitEnumContainsAll(features, GemmFeatures::atomic_add)) {
     return failure();
   }
-  if(isa<Float16Type>(outElementType) && !bitEnumContainsAll(features,
-                              GemmFeatures::atomic_add_f16)) {
+  if (isa<Float16Type>(outElementType) &&
+      !bitEnumContainsAll(features, GemmFeatures::atomic_add_f16)) {
     return failure();
   }
 
@@ -160,8 +160,8 @@ LogicalResult mlir::rock::testFusionLegalitySplitK(func::FuncOp func) {
         // check if generic ops are valid fusions
         for (auto genericOp : genericOps) {
           SmallVector<std::tuple<Operation *, int>> adds;
-          if (failed(
-                  checkValidOutputFusion(genericOp, maybeAlloc.value(), gemmOp.getGemmFeatures(), adds)))
+          if (failed(checkValidOutputFusion(genericOp, maybeAlloc.value(),
+                                            gemmOp.getGemmFeatures(), adds)))
             return WalkResult::interrupt();
         }
 

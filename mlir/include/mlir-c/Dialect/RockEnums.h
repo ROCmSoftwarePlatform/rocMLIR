@@ -20,7 +20,7 @@ enum RocmlirTuningParamSetKind {
   RocmlirTuningParamSetKindFull = 1,
   RocmlirTuningParamSetKindExhaustive = 2
 };
-using RocmlirTuningParamSetKind = enum RocmlirTuningParamSetKind;
+typedef enum RocmlirTuningParamSetKind RocmlirTuningParamSetKind;
 
 #ifdef __cplusplus
 }
