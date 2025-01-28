@@ -36,7 +36,7 @@ bool validOperationGemmOut(Operation &op) {
              ExtUIOp, ExtSIOp, ExtFOp, TruncFOp, TruncIOp>(op);
 }
 
-static LogicalResult validOutput(Type outType, GemmFeatures features) {
+static LogicalResult validOutputAtomicAdd(Type outType, GemmFeatures features) {
   // Split-K currently supports only f32/f16 element types
   if (!isa<Float32Type, Float16Type>(outType))
     return failure();
@@ -145,7 +145,7 @@ LogicalResult mlir::rock::testFusionLegalitySplitK(func::FuncOp func) {
         for (auto blockArg : blockArgs) {
           auto outElementType =
               cast<ShapedType>(blockArg.getType()).getElementType();
-          if (failed(validOutput(outElementType, gemmOp.getGemmFeatures())))
+          if (failed(validOutputAtomicAdd(outElementType, gemmOp.getGemmFeatures())))
             return WalkResult::interrupt();
         }
 
@@ -207,16 +207,7 @@ LogicalResult mlir::rock::testFusionLegalityReduce(func::FuncOp func) {
                               GemmFeatures::atomic_fmax_f32))
         return WalkResult::interrupt();
     } else {
-      if (!isa<Float32Type, Float16Type>(outElemType))
-        return WalkResult::interrupt();
-
-      if (isa<Float32Type>(outElemType) &&
-          !bitEnumContainsAll(reduceOp.getFeatures(), GemmFeatures::atomic_add))
-        return WalkResult::interrupt();
-
-      if (isa<Float16Type>(outElemType) &&
-          !bitEnumContainsAll(reduceOp.getFeatures(),
-                              GemmFeatures::atomic_add_f16))
+      if(failed(validOutputAtomicAdd(outElemType, reduceOp.getFeatures())))
         return WalkResult::interrupt();
     }
     return WalkResult::advance();
