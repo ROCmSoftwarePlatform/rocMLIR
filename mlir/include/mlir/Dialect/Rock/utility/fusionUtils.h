@@ -30,9 +30,9 @@ LogicalResult testFusionLegalitySplitK(func::FuncOp func);
 // the atomic operation is supported by the hardware.
 LogicalResult testFusionLegalityReduce(func::FuncOp func);
 
-// This is an overload of the `testFusionLegality` which is more convenient
+// This is an overload of the `testFusionLegalitySplitK` which is more convenient
 // to use in CAPI. Given a `ModuleOp`, the function retrieve the embedded
-// `func:FuncOp` and calls the implementation `testFusionLegality` (see above).
+// `func:FuncOp` and calls the implementation `testFusionLegalitySplitK` (see above).
 // Note, this overloaded function assumes that `ModuleOp` contains
 // a single `func:FuncOp`
 LogicalResult testFusionLegalitySplitK(ModuleOp mod);
