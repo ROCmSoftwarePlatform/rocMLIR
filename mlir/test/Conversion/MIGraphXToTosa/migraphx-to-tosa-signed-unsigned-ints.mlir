@@ -215,7 +215,7 @@ func.func @basic_add_si32(%arg0: !migraphx.shaped<1x112x112x64xsi32, 802816x7168
 // CHECK: tosa.clamp{{.*}}(tensor<1x64x112x112xi32>) -> tensor<1x64x112x112xi32>
 // CHECK: tosa.cast{{.*}}(tensor<1x64x112x112xi32>) -> tensor<1x64x112x112xi8>
 func.func @conv_with_quant_si8(%arg1: !migraphx.shaped<1x3x224x224xsi8, 150528x50176x224x1>, %arg2: !migraphx.shaped<64x3x7x7xsi8, 147x49x7x1>, %scale: !migraphx.shaped<1x64x1x1xf32, 64x1x1x1>, %bias: !migraphx.shaped<1x64x1x1xsi32, 64x1x1x1>, %bias2: !migraphx.shaped<1x64x1x1xsi8, 64x1x1x1>) -> !migraphx.shaped<1x64x112x112xsi8, 802816x12544x112x1> attributes {kernel = "mixr"} {
-  %1 = migraphx.quant_convolution %arg1, %arg2 {acc_type = i32, dilation = [1, 1], group = 1 : i64, padding = [3, 3, 3, 3], padding_mode = 0 : i64, stride = [2, 2]} : <1x3x224x224xsi8, 150528x50176x224x1>, <64x3x7x7xsi8, 147x49x7x1> -> <1x64x112x112xsi32, 802816x12544x112x1>
+  %1 = migraphx.quant_convolution %arg1, %arg2 {acc_type = si8, dilation = [1, 1], group = 1 : i64, padding = [3, 3, 3, 3], padding_mode = 0 : i64, stride = [2, 2]} : <1x3x224x224xsi8, 150528x50176x224x1>, <64x3x7x7xsi8, 147x49x7x1> -> <1x64x112x112xsi32, 802816x12544x112x1>
   %2 = migraphx.dequantizelinear %1, %scale, %bias : <1x64x112x112xsi32, 802816x12544x112x1>, <1x64x1x1xf32, 64x1x1x1>, !migraphx.shaped<1x64x1x1xsi32, 64x1x1x1> -> <1x64x112x112xf32, 802816x12544x112x1>
   %3 = migraphx.quantizelinear %2, %scale, %bias2 : <1x64x112x112xf32, 802816x12544x112x1>, <1x64x1x1xf32, 64x1x1x1>, !migraphx.shaped<1x64x1x1xsi8, 64x1x1x1> -> <1x64x112x112xsi8, 802816x12544x112x1>
   return %3 : !migraphx.shaped<1x64x112x112xsi8, 802816x12544x112x1>

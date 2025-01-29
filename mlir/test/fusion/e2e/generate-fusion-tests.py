@@ -63,7 +63,7 @@ def generate_type_only_test(indir, outdir, type, file):
     archNames = getArch()
     arch = ','.join(archNames)
     # Use f32 instead of bf16 for certain tests because bf16 is not supported as an accumulation type for tosa.conv2d.
-    gen_type = 'f32' if type == 'bf16' and file in ['mixr-bcast-add', 'tosa-to-rock-bcast-add', 'tosa-to-rock-bias'] else type
+    gen_type = 'f32' if type == 'bf16' and file in ['tosa-to-rock-bcast-add', 'tosa-to-rock-bias'] else type
     if "bf16" in type and "gfx11" in arch:
         return
     with open(f"{indir}/{file}.e2e.template") as f:

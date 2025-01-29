@@ -336,8 +336,6 @@ LogicalResult ConvConverter<ConvType>::matchAndRewrite(
   auto padAttr = cast<ArrayAttr>(op->getAttr("padding"));
   auto strideAttr = cast<ArrayAttr>(op->getAttr("stride"));
   auto dilationAttr = cast<ArrayAttr>(op->getAttr("dilation"));
-  //auto accTypeAttr = cast<TypeAttr>(op->getAttr("acc_type"));
-  //Type acc_type = getTypeConverter()->convertType(accTypeAttr.getValue());
   // MIGraphX padAttr is [hlow, wlow, hhigh, whigh] while TOSA padAttr
   // is [hlow, hhigh, wlow, whigh].
   SmallVector<int64_t> pads;
@@ -354,7 +352,19 @@ LogicalResult ConvConverter<ConvType>::matchAndRewrite(
   }
 
   int64_t group = op.getGroup();
-  auto accType = op.getAccTypeAttr();
+  auto accType = op.getAccTypeAttr().getValue();
+  // Convert acc_type to a type supported by TOSA Conv2D operation.
+  // F8 types are converted to f16, bf16 is converted to f32, and 8-bit integers are converted to i32.
+  if (accType.isFloat8E4M3FNUZ() || accType.isFloat8E5M2FNUZ() || accType.isFloat8E5M2() ||
+      accType.isFloat8E4M3FN()) {
+    accType = rewriter.getF16Type();
+  }
+  else if (accType.isBF16()) {
+    accType = rewriter.getF32Type();
+  }
+  else if (accType.isInteger(8) || accType.isSignlessInteger(8)) {
+    accType = rewriter.getI32Type();
+  }
 
   // convolution config attributes
 
@@ -374,7 +384,7 @@ LogicalResult ConvConverter<ConvType>::matchAndRewrite(
   cop->setAttr("stride", rewriter.getDenseI64ArrayAttr(strides));
   cop->setAttr("pad", rewriter.getDenseI64ArrayAttr(pads));
   cop->setAttr("group", rewriter.getI64IntegerAttr(group));
-  cop->setAttr("acc_type", accType);
+  cop->setAttr("acc_type", TypeAttr::get(accType));
 
   // Convert optional attributes
   if (auto attr = (*op).template getAttrOfType<StringAttr>("perf_config"))
