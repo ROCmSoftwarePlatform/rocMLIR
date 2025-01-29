@@ -1525,7 +1525,7 @@ void RockSugarToLoopsPass::runOnOperation() {
   initialLoopPatterns
       .add<ExtractMultiBufferRewritePattern, TransformingForRewritePattern>(
           ctx);
-  if (failed(applyPatternsAndFoldGreedily(getOperation(),
+  if (failed(applyPatternsGreedily(getOperation(),
                                           std::move(initialLoopPatterns))))
     signalPassFailure();
 
@@ -1533,7 +1533,7 @@ void RockSugarToLoopsPass::runOnOperation() {
   patterns.add<ExtractSliceRewritePattern, InsertSliceRewritePattern,
                GlobalLoadRewritePattern, GlobalStoreRewritePattern,
                InBoundsLoadRewritePattern, InBoundsStoreRewritePattern>(ctx);
-  if (failed(applyPatternsAndFoldGreedily(getOperation(), std::move(patterns))))
+  if (failed(applyPatternsGreedily(getOperation(), std::move(patterns))))
     signalPassFailure();
 
   IRRewriter b(op.getContext());
@@ -1586,7 +1586,7 @@ void RockSugarToLoopsPass::runOnOperation() {
   // calls that are then constant-folded away by this rewriter
   RewritePatternSet postUnrollPatterns(ctx);
   postUnrollPatterns.add<IndexDiffUpdateRewritePattern>(ctx);
-  if (failed(applyPatternsAndFoldGreedily(op, std::move(postUnrollPatterns))))
+  if (failed(applyPatternsGreedily(op, std::move(postUnrollPatterns))))
     signalPassFailure();
 }
 } // end anonymous namespace
