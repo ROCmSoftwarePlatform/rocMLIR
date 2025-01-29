@@ -141,8 +141,7 @@ MlirModule makeAndDumpMIXR(MlirContext ctx, MlirLocation location) {
                             mlirStringRefCreateFromCString("padding_mode")),
           conv0PaddingModeAttr),
       mlirNamedAttributeGet(
-          mlirIdentifierGet(ctx,
-                            mlirStringRefCreateFromCString("acc_type")),
+          mlirIdentifierGet(ctx, mlirStringRefCreateFromCString("acc_type")),
           conv0AccTypeAttr)};
 
   // Set output shape

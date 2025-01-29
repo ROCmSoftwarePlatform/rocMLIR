@@ -1526,7 +1526,7 @@ void RockSugarToLoopsPass::runOnOperation() {
       .add<ExtractMultiBufferRewritePattern, TransformingForRewritePattern>(
           ctx);
   if (failed(applyPatternsGreedily(getOperation(),
-                                          std::move(initialLoopPatterns))))
+                                   std::move(initialLoopPatterns))))
     signalPassFailure();
 
   RewritePatternSet patterns(ctx);

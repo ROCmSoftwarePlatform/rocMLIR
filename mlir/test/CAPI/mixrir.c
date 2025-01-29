@@ -116,7 +116,7 @@ MlirModule makeAndDumpMIXR(MlirContext ctx, MlirLocation location) {
       mlirAttributeParseGet(ctx, mlirStringRefCreateFromCString("1:i64"));
   MlirAttribute conv0PaddingModeAttr =
       mlirAttributeParseGet(ctx, mlirStringRefCreateFromCString("0:i64"));
-  MlirAttribute conv0AccTypeAttr = 
+  MlirAttribute conv0AccTypeAttr =
       mlirAttributeParseGet(ctx, mlirStringRefCreateFromCString("f32"));
   MlirNamedAttribute conv0Attrs[] = {
       mlirNamedAttributeGet(
@@ -135,10 +135,9 @@ MlirModule makeAndDumpMIXR(MlirContext ctx, MlirLocation location) {
           mlirIdentifierGet(ctx,
                             mlirStringRefCreateFromCString("padding_mode")),
           conv0PaddingModeAttr),
-      mlirNamedAttributeGet(  
-          mlirIdentifierGet(ctx,  
-                          mlirStringRefCreateFromCString("acc_type")),  
-           conv0AccTypeAttr)};
+      mlirNamedAttributeGet(
+          mlirIdentifierGet(ctx, mlirStringRefCreateFromCString("acc_type")),
+          conv0AccTypeAttr)};
 
   // Set output shape
   int64_t conv0Dims[] = {1, 64, 56, 56};

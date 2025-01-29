@@ -140,8 +140,8 @@ AMDGPUSerializer::loadBitcodeFiles(llvm::Module &module) {
   // Try to append any remaining standard device libs.
   if (failed(appendStandardLibs(libs)))
     return std::nullopt;
-  if (failed(loadBitcodeFilesFromList(module.getContext(), librariesToLink, bcFiles,
-                                      true)))
+  if (failed(loadBitcodeFilesFromList(module.getContext(), librariesToLink,
+                                      bcFiles, true)))
     return std::nullopt;
   return std::move(bcFiles);
 }
