@@ -83,7 +83,7 @@ void AffixTuningParameters::runOnOperation() {
         zero = b.getIntegerAttr(elementType, 0);
       }
       FailureOr<SmallVector<BlockArgument>> args =
-          traceGemmOutputToArgs(c, func, b, bufferDeps);
+          traceGemmOutputToArgs(c, func, bufferDeps);
       assert(succeeded(args) &&
              "can't trace the GEMM output to a kernel result");
       for (auto arg : args.value())
