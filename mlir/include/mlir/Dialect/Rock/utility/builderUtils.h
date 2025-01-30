@@ -9,6 +9,9 @@
 
 namespace mlir {
 namespace rock {
+// Utility to create an APFloat of the requested type
+std::pair<APFloat, llvm::detail::opStatus> createFloat(Type elemType, float value);
+
 /// Utility op to emit constant float op
 Value createConstantFloatOp(OpBuilder &b, Location loc, Type type,
                             Type elemType, float value,

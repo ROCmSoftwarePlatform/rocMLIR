@@ -39,9 +39,7 @@ Value createConstantIntOp(OpBuilder &b, Location loc, Type type,
   return retValue;
 }
 
-Value createConstantFloatOp(OpBuilder &b, Location loc, Type type,
-                            Type elemType, float value,
-                            APFloat::opStatus expectedStatus) {
+std::pair<APFloat, llvm::detail::opStatus> createFloat(Type elemType, float value) {
   auto semantics = static_cast<APFloat::Semantics>(-1);
   if (elemType.isF32()) {
     semantics = APFloat::S_IEEEsingle;
@@ -66,6 +64,15 @@ Value createConstantFloatOp(OpBuilder &b, Location loc, Type type,
   auto status = apValue.convert(APFloat::EnumToSemantics(semantics),
                                 APFloat::rmNearestTiesToEven, &lostInfo);
 
+  return std::make_pair(apValue, status);
+}
+
+Value createConstantFloatOp(OpBuilder &b, Location loc, Type type,
+                            Type elemType, float value,
+                            APFloat::opStatus expectedStatus) {
+  std::pair<APFloat, llvm::detail::opStatus> floatRes = createFloat(elemType, value);
+  APFloat apValue = floatRes.first;
+  auto status = floatRes.second;
   assert(status == expectedStatus);
   Value retValue;
 

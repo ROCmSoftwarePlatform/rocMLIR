@@ -540,6 +540,15 @@ module  {
     %0 = migraphx.slice %arg0 {axes = [1, 2], ends = [12, 284], starts = [0, 184]} : <1x36x384x64xf32, 884736x24576x64x1> -> <1x12x100x64xf32, 76800x6400x64x1>
     return %0 : !migraphx.shaped<1x12x100x64xf32, 76800x6400x64x1>
   }
+  
+  // CHECK-LABEL: func.func @func_greaterorequal
+  // CHECK: tosa.greaterequal
+  func.func @func_greaterorequal(%arg0: !migraphx.shaped<1x36x384x64xf32, 884736x24576x64x1>) -> !migraphx.shaped<1x36x384x64xi8, 884736x24576x64x1> attributes{kernel, arch = ""} {
+    %cst = migraphx.literal (dense<1.0> : tensor<1x36x384x64xf32>) : <1x36x384x64xf32, 884736x24576x64x1>
+    %0 = migraphx.add %arg0, %cst : <1x36x384x64xf32, 884736x24576x64x1>, <1x36x384x64xf32, 884736x24576x64x1> -> <1x36x384x64xf32, 884736x24576x64x1>
+    %1 = migraphx.greater_or_equal %arg0, %0 : <1x36x384x64xf32, 884736x24576x64x1>, <1x36x384x64xf32, 884736x24576x64x1> -> <1x36x384x64xi32, 884736x24576x64x1>
+    return %1 : !migraphx.shaped<1x36x384x64xi32, 884736x24576x64x1>
+  }
 }
 
 // -----
