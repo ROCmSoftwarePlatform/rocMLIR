@@ -68,31 +68,79 @@ static bool isConstantZero(Value v) {
 static bool isNegInfAttribute(Attribute value) {
   if (auto fpValue = dyn_cast<FloatAttr>(value)) {
     auto value = fpValue.getValue();
-    
-    std::pair<APFloat, llvm::detail::opStatus> floatRes = rock::createFloat(fpValue.getType(), -std::numeric_limits<float>::infinity());
+
+    std::pair<APFloat, llvm::detail::opStatus> floatRes = rock::createAPFloat(
+        fpValue.getType(), -std::numeric_limits<float>::infinity());
     auto expectedValue = floatRes.first;
     auto status = floatRes.second;
     assert(status == APFloat::opOK);
-    
+
     return value.compare(expectedValue) == llvm::APFloat::cmpEqual;
   }
   if (auto splatValue = dyn_cast<SplatElementsAttr>(value))
     return isNegInfAttribute(splatValue.getSplatValue<Attribute>());
   if (auto elementsValue = dyn_cast<ElementsAttr>(value))
-    return llvm::all_of(elementsValue.getValues<Attribute>(), isNegInfAttribute);
+    return llvm::all_of(elementsValue.getValues<Attribute>(),
+                        isNegInfAttribute);
   if (auto elementsValue = dyn_cast<DenseElementsAttr>(value))
-    return llvm::all_of(elementsValue.getValues<Attribute>(), isNegInfAttribute);
+    return llvm::all_of(elementsValue.getValues<Attribute>(),
+                        isNegInfAttribute);
   if (auto arrayValue = dyn_cast<ArrayAttr>(value))
     return llvm::all_of(arrayValue.getValue(), isNegInfAttribute);
 
   return false;
 }
 
-static bool checkConstIsNegInf(Value v) {
+static bool isConstIsNegInf(Value v) {
   if (auto cst = v.getDefiningOp<arith::ConstantOp>())
     return isNegInfAttribute(cst.getValue());
   if (auto cst = v.getDefiningOp<tosa::ConstOp>())
     return isNegInfAttribute(cst->getAttr("value"));
+  return false;
+}
+
+static bool isConstRangeAttribute(Attribute value, int32_t expectedVal) {
+  if (auto intValue = dyn_cast<IntegerAttr>(value)) {
+    auto value = intValue.getValue();
+
+    std::pair<APInt, bool> intRes =
+        rock::createAPInt(intValue.getType(), expectedVal);
+    auto expectedValue = intRes.first;
+    bool overflow = intRes.second;
+    if (overflow)
+      return false;
+
+    return expectedValue == value;
+  }
+  if (auto splatValue = dyn_cast<SplatElementsAttr>(value))
+    return false;
+  if (auto elementsValue = dyn_cast<ElementsAttr>(value))
+    return llvm::all_of(llvm::enumerate(elementsValue.getValues<Attribute>()),
+                        [](const auto &indexedAttr) {
+                          return isConstRangeAttribute(indexedAttr.value(),
+                                                       indexedAttr.index());
+                        });
+  if (auto elementsValue = dyn_cast<DenseElementsAttr>(value))
+    return llvm::all_of(llvm::enumerate(elementsValue.getValues<Attribute>()),
+                        [](const auto &indexedAttr) {
+                          return isConstRangeAttribute(indexedAttr.value(),
+                                                       indexedAttr.index());
+                        });
+  if (auto arrayValue = dyn_cast<ArrayAttr>(value))
+    return llvm::all_of(llvm::enumerate(arrayValue.getValue()),
+                        [](const auto &indexedAttr) {
+                          return isConstRangeAttribute(indexedAttr.value(),
+                                                       indexedAttr.index());
+                        });
+
+  return false;
+}
+
+bool isConstRange(Value v) {
+  if (auto cst = v.getDefiningOp<arith::ConstantOp>())
+    return isConstRangeAttribute(cst.getValue(), 0);
+  if (auto cst = v.getDefiningOp<tosa::ConstOp>())
+    return isConstRangeAttribute(cst->getAttr("value"), 0);
   return false;
 }
 
@@ -852,40 +900,16 @@ static bool isElementwiseOp(Operation *op) {
   // clang-format on
 }
 
-template <typename T>
-bool checkConstIsRange(arith::ConstantOp op) {
-  DenseElementsAttr values = cast<DenseElementsAttr>(op.getValue());
-  
-  // Check that it's an integer tensor
-  if (!isa<IntegerType>(values.getElementType()))
-    return false;
-
-  // Check if values form a range
-  return llvm::all_of(llvm::enumerate(values.getValues<T>()), [](const auto& pair) {
-    return pair.value() == static_cast<T>(pair.index());
-  });
-
-  return true;
-}
-
 struct AttentionRewritePattern : public OpRewritePattern<tosa::MatMulOp> {
   using OpRewritePattern<tosa::MatMulOp>::OpRewritePattern;
 
-  FailureOr<BlockArgument> findBlockArgument(Value value) const {
-    auto maybeBlockArg = dyn_cast_or_null<BlockArgument>(value);
-    while (!maybeBlockArg) {
-      // Keep going until the operation that defines the value is a
-      // view-like operation
-      if (value.getDefiningOp<tensor::CollapseShapeOp>() ||
-           value.getDefiningOp<tensor::ExpandShapeOp>()) {
-        value = value.getDefiningOp()->getOperand(0);
-      } else {
-        return failure();
-      }
-      maybeBlockArg = dyn_cast_or_null<BlockArgument>(value);
+  Value getValueNonReshapeOp(Value val) const {
+    while (val.getDefiningOp() &&
+           (val.getDefiningOp<tensor::CollapseShapeOp>() ||
+            val.getDefiningOp<tensor::ExpandShapeOp>())) {
+      val = val.getDefiningOp()->getOperand(0);
     }
-
-    return maybeBlockArg;
+    return val;
   }
 
   template <typename TosaOp>
@@ -908,59 +932,77 @@ struct AttentionRewritePattern : public OpRewritePattern<tosa::MatMulOp> {
   }
 
   FailureOr<Value> addBroadcast(Value val) const {
-    if(auto add = getDefiningNonReshapeOp<tosa::AddOp>(val)) {
-      // this is a broadcast add, one of the arguments comes is the actual value,
-      // the other is a 0 constant
+    if (auto add = getDefiningNonReshapeOp<tosa::AddOp>(val)) {
+      // this is a broadcast add, one of the arguments comes is the actual
+      // value, the other is a 0 constant
       Value nonZero;
-      if(auto constOp = getDefiningNonReshapeOp<tosa::ConstOp>(add.getInput1())) {
-        if(!isConstantZero(constOp))
-          return failure();
-        nonZero = add.getInput2();
-      } else if(auto constOp = getDefiningNonReshapeOp<tosa::ConstOp>(add.getInput2())) {
-        if(!isConstantZero(constOp))
-          return failure();
-        nonZero = add.getInput1();
+      if (auto constOp =
+              getDefiningNonReshapeOp<tosa::ConstOp>(add.getInput1())) {
+        if (isConstantZero(constOp.getResult()))
+          nonZero = add.getInput2();
+      } else if (auto constOp = getDefiningNonReshapeOp<arith::ConstantOp>(
+                     add.getInput1())) {
+        if (isConstantZero(constOp.getResult()))
+          nonZero = add.getInput2();
       }
-      return nonZero;
+
+      if (auto constOp =
+              getDefiningNonReshapeOp<tosa::ConstOp>(add.getInput2())) {
+        if (isConstantZero(constOp.getResult()))
+          nonZero = add.getInput1();
+      } else if (auto constOp = getDefiningNonReshapeOp<arith::ConstantOp>(
+                     add.getInput2())) {
+        if (isConstantZero(constOp.getResult()))
+          nonZero = add.getInput1();
+      }
+      if (nonZero)
+        return nonZero;
     }
     return failure();
   }
 
   FailureOr<std::pair<Value, Value>> getKVCache(Value softmaxInput) const {
     auto select = getDefiningNonReshapeOp<tosa::SelectOp>(softmaxInput);
-    if(select) {
+    if (select) {
       // Check onTrue is -inf
       auto onTrue = select.getOnTrue();
-      if(!checkConstIsNegInf(onTrue))
+      bool isConsNegInf = false;
+      if (auto constOp = getDefiningNonReshapeOp<arith::ConstantOp>(onTrue))
+        isConsNegInf = isConstIsNegInf(constOp.getResult());
+      else if (auto constOp = getDefiningNonReshapeOp<tosa::ConstOp>(onTrue))
+        isConsNegInf = isConstIsNegInf(constOp.getResult());
+
+      if (!isConsNegInf)
         return failure();
 
       auto pred = select.getPred();
-      if(auto greaterEqual = getDefiningNonReshapeOpNonCastOp<tosa::GreaterEqualOp>(pred)) {
+      if (auto greaterEqual =
+              getDefiningNonReshapeOpNonCastOp<tosa::GreaterEqualOp>(pred)) {
         // input1 is a constant with a range from 0 to maxSeqLen
         auto input1 = greaterEqual.getInput1();
         FailureOr<Value> maybeNonZero1 = addBroadcast(input1);
-        if(failed(maybeNonZero1))
+        if (failed(maybeNonZero1))
           return failure();
-        
+
         // check that maybeNonZero1 is a const with range 0..maxSeqLen
         bool isRange = false;
-        if(auto constRange = getDefiningNonReshapeOp<arith::ConstantOp>(maybeNonZero1.value()))
-          isRange = checkConstIsRange<int32_t>(constRange);
+        if (auto constRange = getDefiningNonReshapeOp<arith::ConstantOp>(
+                maybeNonZero1.value()))
+          isRange = isConstRange(constRange.getResult());
+        if (auto constRange =
+                getDefiningNonReshapeOp<tosa::ConstOp>(maybeNonZero1.value()))
+          isRange = isConstRange(constRange.getResult());
 
-        if(!isRange)
+        if (!isRange)
           return failure();
 
         // input2 comes from argument: currentSeqLen
         auto input2 = greaterEqual.getInput2();
         FailureOr<Value> maybeNonZero2 = addBroadcast(input2);
-        if(failed(maybeNonZero2))
+        if (failed(maybeNonZero2))
           return failure();
 
-        auto maybeBlockArg = findBlockArgument(maybeNonZero2.value());
-        if(failed(maybeBlockArg))
-          return failure();
-
-        Value currentSeqLen = maybeBlockArg.value();
+        Value currentSeqLen = getValueNonReshapeOp(maybeNonZero2.value());
         Value result = select.getOnFalse();
         return std::make_pair(result, currentSeqLen);
       }
@@ -968,12 +1010,13 @@ struct AttentionRewritePattern : public OpRewritePattern<tosa::MatMulOp> {
     return failure();
   }
 
-  FailureOr<std::tuple<Value, bool, Value>> maybeSoftmaxNumerator(Value val) const {
+  FailureOr<std::tuple<Value, bool, Value>>
+  maybeSoftmaxNumerator(Value val) const {
     Value currentSeqLen;
     tosa::ExpOp exp = getDefiningNonReshapeOp<tosa::ExpOp>(val);
     if (!exp)
       return failure();
-      
+
     auto sub = getDefiningNonReshapeOp<tosa::SubOp>(exp.getInput1());
     if (!sub)
       return failure();
@@ -997,14 +1040,14 @@ struct AttentionRewritePattern : public OpRewritePattern<tosa::MatMulOp> {
     // Note that non KV-Cache fusions might have tosa.select
     // so, if the checks for kv-cache fail, we just keep going
     auto maybeKVCache = getKVCache(result);
-    if(succeeded(maybeKVCache)) {
+    if (succeeded(maybeKVCache))
       std::tie(result, currentSeqLen) = maybeKVCache.value();
-    }
 
     return std::make_tuple(result, hasTosaReduce, currentSeqLen);
   }
 
-  FailureOr<std::tuple<Value, bool, Value>> maybeSoftmaxDenominator(Value val) const {
+  FailureOr<std::tuple<Value, bool, Value>>
+  maybeSoftmaxDenominator(Value val) const {
     FailureOr<std::tuple<Value, bool, Value>> result;
     auto rsum = getDefiningNonReshapeOp<tosa::ReduceSumOp>(val);
     if (rsum) {
@@ -1079,17 +1122,17 @@ struct AttentionRewritePattern : public OpRewritePattern<tosa::MatMulOp> {
   // operation that may or maynot be interleaved with reshape-like ops. Note
   // there is a TODO to explore relaxing reshape-like ops constraints to more
   // of rock.transforms. (See the implementation for the TODO)
-  std::tuple<Value, FailureOr<tosa::MatMulOp>>
-  getPreSoftmaxElementwiseRegion(Value input, OpBuilder &regionBuilder,
-                              Block *block, SmallVector<Value> &elementwiseArgs,
-                              std::optional<Location> loc = std::nullopt,
-                              bool doRewrite = false, int recDepth = 0) const {
+  std::tuple<Value, FailureOr<tosa::MatMulOp>> getPreSoftmaxElementwiseRegion(
+      Value input, OpBuilder &regionBuilder, Block *block,
+      SmallVector<Value> &elementwiseArgs,
+      std::optional<Location> loc = std::nullopt, bool doRewrite = false,
+      int recDepth = 0) const {
     PatternRewriter::InsertionGuard guard(regionBuilder);
     regionBuilder.setInsertionPointToEnd(block);
     // If the matmul is found, we return this information to the
     // root.
     LLVM_DEBUG(llvm::dbgs()
-               << std::string(recDepth, '\t') 
+               << std::string(recDepth, '\t')
                << "getPreSoftmaxElementwiseRegion:input=" << input << "\n");
     if (tosa::MatMulOp matmul = input.getDefiningOp<tosa::MatMulOp>()) {
       Value matmulMemRef;
@@ -1107,17 +1150,7 @@ struct AttentionRewritePattern : public OpRewritePattern<tosa::MatMulOp> {
     if (tosa::ConstOp constOp = input.getDefiningOp<tosa::ConstOp>()) {
       Value newConstOpRes;
       if (doRewrite) {
-        auto* newConstOp = regionBuilder.clone(*constOp);
-        newConstOpRes = newConstOp->getResult(0);
-      }
-      LLVM_DEBUG(llvm::dbgs() << std::string(recDepth, '\t')
-                              << "const found. terminating recursion.\n");
-      return {newConstOpRes, failure()};
-    }
-    if (arith::ConstantOp constOp = input.getDefiningOp<arith::ConstantOp>()) {
-      Value newConstOpRes;
-      if (doRewrite) {
-        auto* newConstOp = regionBuilder.clone(*constOp);
+        auto *newConstOp = regionBuilder.clone(*constOp);
         newConstOpRes = newConstOp->getResult(0);
       }
       LLVM_DEBUG(llvm::dbgs() << std::string(recDepth, '\t')
@@ -1162,7 +1195,7 @@ struct AttentionRewritePattern : public OpRewritePattern<tosa::MatMulOp> {
 
     Value res;
     if (doRewrite) {
-      auto* newOp = regionBuilder.clone(*op, mapper);
+      auto *newOp = regionBuilder.clone(*op, mapper);
       res = newOp->getResult(0);
     }
     // We convey to the caller the result
@@ -1187,7 +1220,8 @@ struct AttentionRewritePattern : public OpRewritePattern<tosa::MatMulOp> {
 
     Value softmaxInput;
     bool hasReduceOp;
-    std::tie(softmaxInput, hasReduceOp, std::ignore) = softmaxInputResult.value();
+    std::tie(softmaxInput, hasReduceOp, std::ignore) =
+        softmaxInputResult.value();
     OpBuilder b{op};
     SmallVector<Value> vec;
     FailureOr<tosa::MatMulOp> maybeFirstMatMul;
@@ -1219,7 +1253,8 @@ struct AttentionRewritePattern : public OpRewritePattern<tosa::MatMulOp> {
   void rewrite(tosa::MatMulOp op, PatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
     Value softmaxInput, currentSeqLen;
-    std::tie(softmaxInput, std::ignore, currentSeqLen) = maybeSoftmax(op.getA()).value();
+    std::tie(softmaxInput, std::ignore, currentSeqLen) =
+        maybeSoftmax(op.getA()).value();
     auto outputType = cast<RankedTensorType>(op.getType());
     Value output = rewriter.create<bufferization::AllocTensorOp>(
         loc, outputType, ValueRange{});

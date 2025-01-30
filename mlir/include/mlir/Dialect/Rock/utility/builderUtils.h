@@ -9,8 +9,12 @@
 
 namespace mlir {
 namespace rock {
+// Utility to create an APInt of the requested type
+std::pair<APInt, bool> createAPInt(Type elemType, int32_t value);
+
 // Utility to create an APFloat of the requested type
-std::pair<APFloat, llvm::detail::opStatus> createFloat(Type elemType, float value);
+std::pair<APFloat, llvm::detail::opStatus> createAPFloat(Type elemType,
+                                                         float value);
 
 /// Utility op to emit constant float op
 Value createConstantFloatOp(OpBuilder &b, Location loc, Type type,
