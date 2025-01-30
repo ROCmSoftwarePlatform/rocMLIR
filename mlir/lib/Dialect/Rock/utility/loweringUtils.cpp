@@ -318,6 +318,7 @@ FailureOr<RegsAsMatrixSubTiles> mlir::rock::getPackedRegsAsTileViews(
   int64_t dThreads = dPerBlock / dPerThread;
 
   int64_t kpackPerThread = std::min(kPerThread, kpack);
+  assert(kPerThread % kpackPerThread == 0);
   int64_t kOuterPerThread = kPerThread / kpackPerThread;
 
   RegsAsMatrixSubTiles gpuViews;
@@ -834,7 +835,6 @@ static void traceGemmAllocToArgs(memref::AllocOp buffer,
 
 FailureOr<SmallVector<BlockArgument>>
 mlir::rock::traceGemmOutputToArgs(Value matC, func::FuncOp func,
-                                  OpBuilder &builder,
                                   const BufferDependencyAnalysis &deps) {
   if (func.getNumArguments() == 0)
     return failure();

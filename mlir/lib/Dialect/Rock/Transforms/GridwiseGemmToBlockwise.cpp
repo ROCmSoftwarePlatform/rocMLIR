@@ -127,8 +127,7 @@ computeCopyPerThread(Type elementType, int64_t copyPerThread, int64_t kPerBlock,
     copyDPerThread = math_util::gcd(maxVlen, copyPerThread);
     copyKPerThread = copyPerThread / copyDPerThread;
   } else {
-    copyKPerThread =
-        math_util::gcd(maxVlen, math_util::gcd(kpack, copyPerThread));
+    copyKPerThread = math_util::gcd(maxVlen, copyPerThread);
     copyDPerThread = copyPerThread / copyKPerThread;
   }
 
@@ -177,6 +176,7 @@ static FailureOr<Value> wrapLDSBufferForStore(OpBuilder &b, Location loc,
            << " elements but has " << bufferShape[0];
   }
   int64_t kpackPerThread = std::min(kPerThread, kpack);
+  assert(kpack % kpackPerThread == 0);
   int64_t threadsPerKpack = kpack / kpackPerThread;
 
   Type ldsWriteType = vectorTypeOrSelf(dataType, kpackPerThread);
