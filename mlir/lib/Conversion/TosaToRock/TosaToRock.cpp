@@ -33,6 +33,7 @@
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/bit.h"
+#include <utility>
 
 #define DEBUG_TYPE "convert-tosa-to-rock"
 
@@ -842,7 +843,11 @@ static bool isElementwiseOp(Operation *op) {
         tosa::LogicalNotOp,
         tosa::NegateOp,
         tosa::ReciprocalOp,
-        tosa::RsqrtOp
+        tosa::RsqrtOp,
+        tosa::SelectOp,
+        tosa::EqualOp,
+        tosa::GreaterOp,
+        tosa::GreaterEqualOp
        >(op);
   // clang-format on
 }
@@ -921,34 +926,8 @@ struct AttentionRewritePattern : public OpRewritePattern<tosa::MatMulOp> {
     return failure();
   }
 
-  FailureOr<std::tuple<Value, bool, Value>> maybeSoftmaxNumerator(Value val) const {
-    Value currentSeqLen;
-    tosa::ExpOp exp = getDefiningNonReshapeOp<tosa::ExpOp>(val);
-    if (!exp)
-      return failure();
-      
-    auto sub = getDefiningNonReshapeOp<tosa::SubOp>(exp.getInput1());
-    if (!sub)
-      return failure();
-
-    bool hasTosaReduce = false;
-    Value result;
-    auto rmax = getDefiningNonReshapeOp<tosa::ReduceMaxOp>(sub.getInput2());
-    if (rmax) {
-      if (rmax.getInput() != sub.getInput1())
-        return failure();
-
-      hasTosaReduce = true;
-      result = rmax.getInput();
-    } else {
-      if (sub.getInput1() != sub.getInput2())
-        return failure();
-
-      hasTosaReduce = false;
-      result = sub.getInput1();
-    }
-    // KV-Cache
-    auto select = getDefiningNonReshapeOp<tosa::SelectOp>(result);
+  FailureOr<std::pair<Value, Value>> getKVCache(Value softmaxInput) const {
+    auto select = getDefiningNonReshapeOp<tosa::SelectOp>(softmaxInput);
     if(select) {
       // Check onTrue is -inf
       auto onTrue = select.getOnTrue();
@@ -981,11 +960,45 @@ struct AttentionRewritePattern : public OpRewritePattern<tosa::MatMulOp> {
         if(failed(maybeBlockArg))
           return failure();
 
-        currentSeqLen = maybeBlockArg.value();
-      } else
+        Value currentSeqLen = maybeBlockArg.value();
+        Value result = select.getOnFalse();
+        return std::make_pair(result, currentSeqLen);
+      }
+    }
+    return failure();
+  }
+
+  FailureOr<std::tuple<Value, bool, Value>> maybeSoftmaxNumerator(Value val) const {
+    Value currentSeqLen;
+    tosa::ExpOp exp = getDefiningNonReshapeOp<tosa::ExpOp>(val);
+    if (!exp)
+      return failure();
+      
+    auto sub = getDefiningNonReshapeOp<tosa::SubOp>(exp.getInput1());
+    if (!sub)
+      return failure();
+
+    bool hasTosaReduce = false;
+    Value result;
+    auto rmax = getDefiningNonReshapeOp<tosa::ReduceMaxOp>(sub.getInput2());
+    if (rmax) {
+      if (rmax.getInput() != sub.getInput1())
         return failure();
 
-      result = select.getOnFalse();
+      hasTosaReduce = true;
+      result = rmax.getInput();
+    } else {
+      if (sub.getInput1() != sub.getInput2())
+        return failure();
+
+      hasTosaReduce = false;
+      result = sub.getInput1();
+    }
+    // Note that non KV-Cache fusions might have tosa.select
+    // so, if the checks for kv-cache fail, we just keep going
+    auto maybeKVCache = getKVCache(result);
+    if(succeeded(maybeKVCache)) {
+      std::tie(result, currentSeqLen) = maybeKVCache.value();
     }
 
     return std::make_tuple(result, hasTosaReduce, currentSeqLen);
@@ -1130,7 +1143,7 @@ struct AttentionRewritePattern : public OpRewritePattern<tosa::MatMulOp> {
       return {blockArg, failure()};
     }
     // Following section recursively calls into the left and right
-    // sub-tree to grab as much of the elemwise tree rooted on softmax
+    // sub-tree to grab as much of the elementwise tree rooted on softmax
     // input.
     mlir::IRMapping mapper;
     SmallVector<Value> newOperands;
@@ -1149,7 +1162,7 @@ struct AttentionRewritePattern : public OpRewritePattern<tosa::MatMulOp> {
 
     Value res;
     if (doRewrite) {
-      auto newOp = regionBuilder.clone(*op, mapper);
+      auto* newOp = regionBuilder.clone(*op, mapper);
       res = newOp->getResult(0);
     }
     // We convey to the caller the result
