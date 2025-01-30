@@ -39,9 +39,29 @@ Value createConstantIntOp(OpBuilder &b, Location loc, Type type,
   return retValue;
 }
 
-Value createConstantFloatOp(OpBuilder &b, Location loc, Type type,
-                            Type elemType, float value,
-                            APFloat::opStatus expectedStatus) {
+std::pair<APInt, bool> createAPInt(Type elemType, int32_t value) {
+  auto bitWidth = elemType.getIntOrFloatBitWidth();
+
+  APInt apValue(32, value, true);
+  bool overflow = false;
+  if (bitWidth != 32) {
+    if (bitWidth < 32) {
+      apValue = apValue.trunc(bitWidth);
+
+      // check if value fits in target type
+      APInt extended = apValue.sext(32);
+      overflow = extended != APInt(32, value, true);
+    } else {
+      // Sign extend to larger width
+      apValue = apValue.sext(bitWidth);
+    }
+  }
+
+  return std::make_pair(apValue, overflow);
+}
+
+std::pair<APFloat, llvm::detail::opStatus> createAPFloat(Type elemType,
+                                                         float value) {
   auto semantics = static_cast<APFloat::Semantics>(-1);
   if (elemType.isF32()) {
     semantics = APFloat::S_IEEEsingle;
@@ -66,6 +86,16 @@ Value createConstantFloatOp(OpBuilder &b, Location loc, Type type,
   auto status = apValue.convert(APFloat::EnumToSemantics(semantics),
                                 APFloat::rmNearestTiesToEven, &lostInfo);
 
+  return std::make_pair(apValue, status);
+}
+
+Value createConstantFloatOp(OpBuilder &b, Location loc, Type type,
+                            Type elemType, float value,
+                            APFloat::opStatus expectedStatus) {
+  std::pair<APFloat, llvm::detail::opStatus> floatRes =
+      createAPFloat(elemType, value);
+  APFloat apValue = floatRes.first;
+  auto status = floatRes.second;
   assert(status == expectedStatus);
   Value retValue;
 

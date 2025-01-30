@@ -132,7 +132,6 @@ module  {
   // CHECK-LABEL: func @quantize_scale_bias_fp8
   // CHECK: tosa.reciprocal
   // CHECK: tosa.mul
-  // CHECK: tosa.cast{{.*}}f32{{.*}}f32
   // CHECK: tosa.cast{{.*}}f8E4M3FNUZ{{.*}}f32
   // CHECK: tosa.add
   // CHECK: tosa.clamp
@@ -147,7 +146,6 @@ module  {
   // CHECK-LABEL: func @quantize_scale_bias_fp8_ocp
   // CHECK: tosa.reciprocal
   // CHECK: tosa.mul
-  // CHECK: tosa.cast{{.*}}f32{{.*}}f32
   // CHECK: tosa.cast{{.*}}f8E4M3FN{{.*}}f32
   // CHECK: tosa.add
   // CHECK: tosa.clamp
@@ -539,6 +537,15 @@ module  {
   func.func @func_slice2(%arg0: !migraphx.shaped<1x36x384x64xf32, 884736x24576x64x1>) -> !migraphx.shaped<1x12x100x64xf32, 76800x6400x64x1> attributes{kernel, arch = ""} {
     %0 = migraphx.slice %arg0 {axes = [1, 2], ends = [12, 284], starts = [0, 184]} : <1x36x384x64xf32, 884736x24576x64x1> -> <1x12x100x64xf32, 76800x6400x64x1>
     return %0 : !migraphx.shaped<1x12x100x64xf32, 76800x6400x64x1>
+  }
+  
+  // CHECK-LABEL: func.func @func_greaterorequal
+  // CHECK: tosa.greater_equal
+  func.func @func_greaterorequal(%arg0: !migraphx.shaped<1x36x384x64xi32, 884736x24576x64x1>) -> !migraphx.shaped<1x36x384x64xi32, 884736x24576x64x1> attributes{kernel, arch = ""} {
+    %cst = migraphx.literal (dense<1> : tensor<1x36x384x64xi32>) : <1x36x384x64xi32, 884736x24576x64x1>
+    %0 = migraphx.add %arg0, %cst : <1x36x384x64xi32, 884736x24576x64x1>, <1x36x384x64xi32, 884736x24576x64x1> -> <1x36x384x64xi32, 884736x24576x64x1>
+    %1 = migraphx.greater_or_equal %arg0, %0 : <1x36x384x64xi32, 884736x24576x64x1>, <1x36x384x64xi32, 884736x24576x64x1> -> <1x36x384x64xi32, 884736x24576x64x1>
+    return %1 : !migraphx.shaped<1x36x384x64xi32, 884736x24576x64x1>
   }
 }
 
