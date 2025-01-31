@@ -177,7 +177,7 @@ void setHeartbeat() {
 String getLabelFromCodepath(String codepath) {
     echo "codepath is ${codepath}"
     if (codepath == "mfma") {
-        label = 'mlir && (gfx942 || gfx908 || gfx90a)'
+        label = 'mlir && (gfx950 || gfx942 || gfx908 || gfx90a)'
     } else if (codepath == "navi21") {
         // For non-performance related testing, use both workstations (gfx1030w)
         // and server nodes (gfx1030)
@@ -206,6 +206,8 @@ String getLabelFromChip(String chip) {
             return "mlir && gfx90a"
         case "gfx942":
             return "mlir && gfx942"
+        case "gfx950":
+            return "mlir && gfx950"
         case "gfx1030":
             // For [Tune MLIR Kernels] and [Performance report] stages,
             // fix the vm-5 workstation for testing
@@ -347,6 +349,8 @@ boolean shouldRunFromChip(String chip) {
             return params.disable908 == false && shouldRunFromCodepath("mfma")
         case "gfx942":
             return params.disable942 == false && shouldRunFromCodepath("mfma")
+        case "gfx950":
+            return params.disable950 == false && shouldRunFromCodepath("mfma")
         case "gfx1030":
             return shouldRunFromCodepath("navi21")
         case "gfx1100":
@@ -478,6 +482,8 @@ pipeline {
                      description: 'Disable testing on gfx908')
         booleanParam(name: 'disable942', defaultValue: false,
                      description: 'Disable testing on gfx942')
+        booleanParam(name: 'disable950', defaultValue: false,
+                     description: 'Disable testing on gfx950')
 
         // option only to be used with upstream merges
         booleanParam(name: 'ignoreExternalLinting', defaultValue: false,

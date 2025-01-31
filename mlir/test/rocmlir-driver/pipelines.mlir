@@ -2,6 +2,7 @@
 // RUN: rocmlir-driver -dump-pipelines -kernel-pipeline=gpu -arch=gfx90a /dev/null -o /dev/null 2>&1 | sed -e 's/,/,\n/g' | FileCheck %s --check-prefix=GPU --match-full-lines --strict-whitespace
 // RUN: rocmlir-driver -dump-pipelines -kernel-pipeline=binary -arch=gfx90a /dev/null -o /dev/null 2>&1 | sed -e 's/,/,\n/g' | FileCheck %s --check-prefix=BINARY --match-full-lines --strict-whitespace
 // RUN: rocmlir-driver -dump-pipelines -kernel-pipeline=binary -arch=gfx940 /dev/null -o /dev/null 2>&1 | sed -e 's/,/,\n/g' | FileCheck %s --check-prefix=BINARY_MI300 --match-full-lines --strict-whitespace
+// RUN: rocmlir-driver -dump-pipelines -kernel-pipeline=binary -arch=gfx950 /dev/null -o /dev/null 2>&1 | sed -e 's/,/,\n/g' | FileCheck %s --check-prefix=BINARY_MI350 --match-full-lines --strict-whitespace
 // RUN: rocmlir-driver -dump-pipelines -host-pipeline=partition -targets=gfx90a /dev/null -o /dev/null 2>&1 | sed -e 's/,/,\n/g' | FileCheck %s --check-prefix=PARTITION --match-full-lines --strict-whitespace
 // RUN: rocmlir-driver -dump-pipelines -host-pipeline=mhal -targets=gfx90a /dev/null -o /dev/null 2>&1 | sed -e 's/,/,\n/g' | FileCheck %s --check-prefix=MHAL --match-full-lines --strict-whitespace
 // RUN: rocmlir-driver -dump-pipelines -host-pipeline=highlevel -arch=gfx90a /dev/null -o /dev/null 2>&1 | sed -e 's/,/,\n/g' | FileCheck %s --check-prefix=HIGHLEVEL --match-full-lines --strict-whitespace
@@ -81,6 +82,26 @@
 // BINARY_MI300-NEXT:gpu-module-to-binary{format=fatbin  opts= toolkit=},
 // BINARY_MI300-NEXT:rock-check-residency,
 // BINARY_MI300-NEXT:emulate-fp8-ext-trunc{f8-conversion-instrs=false ocpf8-conversion-instrs=false})
+
+// BINARY_MI350:Kernel pipeline:
+// BINARY_MI350-NEXT:builtin.module(strip-debuginfo,
+// BINARY_MI350-NEXT:gpu.module(amdgpu-emulate-atomics{chipset=gfx950},
+// BINARY_MI350-NEXT:arith-emulate-unsupported-floats{source-types={f8E4M3FNUZ,
+// BINARY_MI350-NEXT:f8E5M2FNUZ,
+// BINARY_MI350-NEXT:f8E4M3FN,
+// BINARY_MI350-NEXT:f8E5M2} target-type=f32},
+// BINARY_MI350-NEXT:convert-arith-to-amdgpu{allow-packed-f16-round-to-zero=true chipset=gfx950 saturate-fp8-truncf=true},
+// BINARY_MI350-NEXT:emulate-fp8-ext-trunc{f8-conversion-instrs=false ocpf8-conversion-instrs=true},
+// BINARY_MI350-NEXT:expand-strided-metadata,
+// BINARY_MI350-NEXT:lower-affine,
+// BINARY_MI350-NEXT:convert-gpu-to-rocdl{chipset=gfx950 index-bitwidth=0 runtime=HIP use-bare-ptr-memref-call-conv=true},
+// BINARY_MI350-NEXT:llvm.func(canonicalize{  max-iterations=10 max-num-rewrites=-1 region-simplify=normal test-convergence=false top-down=true},
+// BINARY_MI350-NEXT:cse,
+// BINARY_MI350-NEXT:rock-prepare-llvm)),
+// BINARY_MI350-NEXT:rocdl-attach-target{O=3 abi=500 chip=gfx950 correct-sqrt=true daz=false fast=false features= finite-only=false  module= triple=amdgcn-amd-amdhsa unsafe-math=false wave64=true},
+// BINARY_MI350-NEXT:gpu-module-to-binary{format=fatbin  opts= toolkit=},
+// BINARY_MI350-NEXT:rock-check-residency,
+// BINARY_MI350-NEXT:emulate-fp8-ext-trunc{f8-conversion-instrs=false ocpf8-conversion-instrs=false})
 
 // PARTITION:Partitioner pipeline:
 // PARTITION-NEXT:builtin.module(func.func(tosa-make-broadcastable),
