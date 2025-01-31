@@ -352,21 +352,15 @@ LogicalResult ConvConverter<ConvType>::matchAndRewrite(
   }
 
   int64_t group = op.getGroup();
-  auto accType = op.getAccTypeAttr().getValue();
-  // Convert acc_type to a type supported by TOSA Conv2D operation.
-  // F8 types are converted to f16, bf16 is converted to f32, and 8-bit integers
-  // are converted to i32.
-  if (accType.isFloat8E4M3FNUZ() || accType.isFloat8E5M2FNUZ() ||
-      accType.isFloat8E5M2() || accType.isFloat8E4M3FN()) {
-    accType = rewriter.getF16Type();
-  } else if (accType.isBF16()) {
+  // Determine the accumulation type based on the output type. 
+  Type accType;
+  if (isa<FloatType>(outElementTy)) {
     accType = rewriter.getF32Type();
-  } else if (accType.isInteger(8) || accType.isSignlessInteger(8)) {
+  } else if (isa<IntegerType>(outElementTy)) {
     accType = rewriter.getI32Type();
   }
 
   // convolution config attributes
-
   if (dims == 1) {
     if ((dilations.size() != 1) || (strides.size() != 1) ||
         (pads.size() != 2)) {

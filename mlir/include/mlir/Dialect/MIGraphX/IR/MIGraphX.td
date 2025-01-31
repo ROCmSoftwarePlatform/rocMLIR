@@ -314,7 +314,6 @@ class MIGraphX_ConvOpBase<string mnemonic, list<Type> inputTypes=[], list<Type> 
                          I64ArrayAttr:$stride,
                          I64ArrayAttr:$dilation,
                          I64Attr:$group,
-                         TypeAttr:$acc_type,
                          OptionalAttr<I64Attr>:$padding_mode,
                          OptionalAttr<StrAttr>:$perf_config);
 	  let results = (outs MIXRShapedOf<outputTypes>:$output);

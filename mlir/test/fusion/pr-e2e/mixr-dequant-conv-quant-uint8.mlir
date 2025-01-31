@@ -17,7 +17,7 @@ module {
     %0 = migraphx.multibroadcast %arg1 {out_dyn_dims = [], out_lens = [1, 1, 7, 7]} : <1xf32, 1> -> <1x1x7x7xf32, 0x0x0x0>
     %1 = migraphx.multibroadcast %arg2 {out_dyn_dims = [], out_lens = [1, 1, 7, 7]} : <1xui8, 1> -> <1x1x7x7xui8, 0x0x0x0>
     %2 = migraphx.dequantizelinear %arg0_reshaped, %0, %1 : <1x1x7x7xui8, 49x49x7x1>, <1x1x7x7xf32, 0x0x0x0>, !migraphx.shaped<1x1x7x7xui8, 0x0x0x0> -> <1x1x7x7xf32, 49x49x7x1>
-    %3 = migraphx.convolution %2, %arg5 {acc_type = f32, dilation = [1, 1], group = 1 : i64, padding = [0, 0, 0, 0], padding_mode = 0 : i64, stride = [1, 1]} : <1x1x7x7xf32, 49x49x7x1>, <1x1x1x1xf32, 1x1x1x1> -> <1x1x7x7xf32, 49x49x7x1>
+    %3 = migraphx.convolution %2, %arg5 {dilation = [1, 1], group = 1 : i64, padding = [0, 0, 0, 0], padding_mode = 0 : i64, stride = [1, 1]} : <1x1x7x7xf32, 49x49x7x1>, <1x1x1x1xf32, 1x1x1x1> -> <1x1x7x7xf32, 49x49x7x1>
     %4 = migraphx.quantizelinear %3, %arg3, %arg4 : <1x1x7x7xf32, 49x49x7x1>, <1x1x7x7xf32, 7x7x7x1>, !migraphx.shaped<1x1x7x7xui8, 7x7x7x1> -> <1x1x7x7xui8, 49x49x7x1>
     return %4 : !migraphx.shaped<1x1x7x7xui8, 49x49x7x1>
   }

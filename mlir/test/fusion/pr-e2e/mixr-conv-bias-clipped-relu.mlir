@@ -8,7 +8,7 @@ module {
     %2 = migraphx.literal (dense<0.000000e+00> : tensor<1xf32>) : <1xf32, 0>
     %3 = migraphx.multibroadcast %2 {out_dyn_dims = [], out_lens = [4, 4, 1, 1]} : <1xf32, 0> -> <4x4x1x1xf32, 0x0x0x0>
     %4 = migraphx.multibroadcast %1 {out_dyn_dims = [], out_lens = [4, 4, 1, 1]} : <1xf32, 0> -> <4x4x1x1xf32, 0x0x0x0>
-    %5 = migraphx.convolution %arg1, %arg2 {acc_type = f32, dilation = [1, 1], group = 1 : i64, padding = [0, 0, 0, 0], padding_mode = 0 : i64, stride = [1, 1]} : <4x3x3x3xf32, 27x9x3x1>, <4x3x3x3xf32, 27x9x3x1> -> <4x4x1x1xf32, 4x1x1x1>
+    %5 = migraphx.convolution %arg1, %arg2 {dilation = [1, 1], group = 1 : i64, padding = [0, 0, 0, 0], padding_mode = 0 : i64, stride = [1, 1]} : <4x3x3x3xf32, 27x9x3x1>, <4x3x3x3xf32, 27x9x3x1> -> <4x4x1x1xf32, 4x1x1x1>
     %6 = migraphx.add %5, %0 : <4x4x1x1xf32, 4x1x1x1>, <4x4x1x1xf32, 0x1x1x1> -> <4x4x1x1xf32, 4x1x1x1>
     %7 = migraphx.clip %6, %3, %4 : <4x4x1x1xf32, 4x1x1x1>, <4x4x1x1xf32, 0x0x0x0>, <4x4x1x1xf32, 0x0x0x0> -> <4x4x1x1xf32, 4x1x1x1>
     return %7 : !migraphx.shaped<4x4x1x1xf32, 4x1x1x1>
@@ -25,7 +25,7 @@ module {
       %2 = migraphx.literal (dense<0.000000e+00> : tensor<1xf32>) : <1xf32, 0>
       %3 = migraphx.multibroadcast %2 {out_dyn_dims = [], out_lens = [4, 4, 1, 1]} : <1xf32, 0> -> <4x4x1x1xf32, 0x0x0x0>
       %4 = migraphx.multibroadcast %1 {out_dyn_dims = [], out_lens = [4, 4, 1, 1]} : <1xf32, 0> -> <4x4x1x1xf32, 0x0x0x0>
-      %5 = migraphx.convolution %arg1, %arg2 {acc_type = f32, dilation = [1, 1], group = 1 : i64, padding = [0, 0, 0, 0], padding_mode = 0 : i64, stride = [1, 1]} : <4x3x3x3xf32, 27x9x3x1>, <4x3x3x3xf32, 27x9x3x1> -> <4x4x1x1xf32, 4x1x1x1>
+      %5 = migraphx.convolution %arg1, %arg2 {dilation = [1, 1], group = 1 : i64, padding = [0, 0, 0, 0], padding_mode = 0 : i64, stride = [1, 1]} : <4x3x3x3xf32, 27x9x3x1>, <4x3x3x3xf32, 27x9x3x1> -> <4x4x1x1xf32, 4x1x1x1>
       %6 = migraphx.add %5, %0 : <4x4x1x1xf32, 4x1x1x1>, <4x4x1x1xf32, 0x1x1x1> -> <4x4x1x1xf32, 4x1x1x1>
       %7 = migraphx.clip %6, %3, %4 : <4x4x1x1xf32, 4x1x1x1>, <4x4x1x1xf32, 0x0x0x0>, <4x4x1x1xf32, 0x0x0x0> -> <4x4x1x1xf32, 4x1x1x1>
       return %7 : !migraphx.shaped<4x4x1x1xf32, 4x1x1x1>

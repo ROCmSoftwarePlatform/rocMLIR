@@ -116,8 +116,6 @@ MlirModule makeAndDumpMIXR(MlirContext ctx, MlirLocation location) {
       mlirAttributeParseGet(ctx, mlirStringRefCreateFromCString("1:i64"));
   MlirAttribute conv0PaddingModeAttr =
       mlirAttributeParseGet(ctx, mlirStringRefCreateFromCString("0:i64"));
-  MlirAttribute conv0AccTypeAttr =
-      mlirAttributeParseGet(ctx, mlirStringRefCreateFromCString("f32"));
   MlirNamedAttribute conv0Attrs[] = {
       mlirNamedAttributeGet(
           mlirIdentifierGet(ctx, mlirStringRefCreateFromCString("padding")),
@@ -134,10 +132,7 @@ MlirModule makeAndDumpMIXR(MlirContext ctx, MlirLocation location) {
       mlirNamedAttributeGet(
           mlirIdentifierGet(ctx,
                             mlirStringRefCreateFromCString("padding_mode")),
-          conv0PaddingModeAttr),
-      mlirNamedAttributeGet(
-          mlirIdentifierGet(ctx, mlirStringRefCreateFromCString("acc_type")),
-          conv0AccTypeAttr)};
+          conv0PaddingModeAttr)};
 
   // Set output shape
   int64_t conv0Dims[] = {1, 64, 56, 56};
@@ -150,7 +145,7 @@ MlirModule makeAndDumpMIXR(MlirContext ctx, MlirLocation location) {
       mlirStringRefCreateFromCString("migraphx.convolution"), location);
   mlirOperationStateAddResults(&conv0OpState, 1, &conv0Type);
   mlirOperationStateAddOperands(&conv0OpState, 2, conv0Operands);
-  mlirOperationStateAddAttributes(&conv0OpState, 6, conv0Attrs);
+  mlirOperationStateAddAttributes(&conv0OpState, 5, conv0Attrs);
   MlirOperation conv0Op = mlirOperationCreate(&conv0OpState);
   mlirBlockAppendOwnedOperation(funcBody, conv0Op);
   MlirValue conv0Value = mlirOperationGetResult(conv0Op, 0);

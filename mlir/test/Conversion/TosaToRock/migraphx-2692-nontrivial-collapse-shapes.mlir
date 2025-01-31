@@ -3,7 +3,7 @@
 // COM: func.func @mlir_reshape_transpose_reshape_convolution(%arg0: !migraphx.shaped<1x116x28x28xf32, 90944x784x28x1>, %arg1: !migraphx.shaped<116x1x3x3xf32, 9x9x3x1>) -> !migraphx.shaped<1x116x14x14xf32, 22736x196x14x1> attributes {arch = "gfx1100", kernel = "mixr"} {    %0 = migraphx.reshape %arg0 {dims = [1, 2, 58, 28, 28]} : <1x116x28x28xf32, 90944x784x28x1> -> <1x2x58x28x28xf32, 90944x45472x784x28x1>
 // COM:   %1 = migraphx.transpose %0 {permutation = [0, 2, 1, 3, 4]} : <1x2x58x28x28xf32, 90944x45472x784x28x1> -> <1x58x2x28x28xf32, 90944x784x45472x28x1>
 // COM:   %2 = migraphx.reshape %1 {dims = [1, -1, 28, 28]} : <1x58x2x28x28xf32, 90944x784x45472x28x1> -> <1x116x28x28xf32, 90944x784x28x1>
-// COM:   %3 = migraphx.convolution %2, %arg1 {acc_type = f32, dilation = [1, 1], group = 116 : i64, padding = [1, 1, 1, 1], padding_mode = 0 : i64, stride = [2, 2]} : <1x116x28x28xf32, 90944x784x28x1>, <116x1x3x3xf32, 9x9x3x1> -> <1x116x14x14xf32, 22736x196x14x1>
+// COM:   %3 = migraphx.convolution %2, %arg1 {dilation = [1, 1], group = 116 : i64, padding = [1, 1, 1, 1], padding_mode = 0 : i64, stride = [2, 2]} : <1x116x28x28xf32, 90944x784x28x1>, <116x1x3x3xf32, 9x9x3x1> -> <1x116x14x14xf32, 22736x196x14x1>
 // COM:   return %3 : !migraphx.shaped<1x116x14x14xf32, 22736x196x14x1>
 // COM: }
 // COM: which contains non-trivial slicing-and-dicing of a dimension,
