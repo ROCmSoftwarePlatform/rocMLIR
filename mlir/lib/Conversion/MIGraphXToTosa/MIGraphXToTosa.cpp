@@ -352,7 +352,8 @@ LogicalResult ConvConverter<ConvType>::matchAndRewrite(
   }
 
   int64_t group = op.getGroup();
-  // Determine the accumulation type based on the output type. 
+
+  // Determine the accumulation type based on the output type.
   Type accType;
   if (isa<FloatType>(outElementTy)) {
     accType = rewriter.getF32Type();
