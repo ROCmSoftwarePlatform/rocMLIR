@@ -835,7 +835,6 @@ static void traceGemmAllocToArgs(memref::AllocOp buffer,
 
 FailureOr<SmallVector<BlockArgument>>
 mlir::rock::traceGemmOutputToArgs(Value matC, func::FuncOp func,
-                                  OpBuilder &builder,
                                   const BufferDependencyAnalysis &deps) {
   if (func.getNumArguments() == 0)
     return failure();

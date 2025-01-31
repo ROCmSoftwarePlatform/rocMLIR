@@ -184,11 +184,6 @@ GemmRewritePattern::matchAndRewrite(GemmOp op, GemmOpAdaptor adaptor,
 
   const int64_t splitKFactor = op.getParams()->getSplitKFactor();
   if (splitKFactor > 1) {
-    if (!bitEnumContainsAll(op.getFeatures(), GemmFeatures::atomic_add)) {
-      return op.emitError(
-          "Split-K `GemmOp` requires support of `atomic_add` hardware feature");
-    }
-
     auto maybeSplitk =
         arrangeSplitKTransform(rw, op, loc, splitKFactor, a, b, c);
     if (failed(maybeSplitk))
@@ -282,7 +277,7 @@ GemmRewritePattern::arrangeSplitKTransform(OpBuilder &builder, GemmOp op,
   Value matC = op.getC();
   auto func = llvm::cast<func::FuncOp>(op->getParentOp());
   FailureOr<SmallVector<BlockArgument>> args =
-      traceGemmOutputToArgs(matC, func, builder, bufferDeps);
+      traceGemmOutputToArgs(matC, func, bufferDeps);
   if (failed(args)) {
     return op->emitError("can't trace gemm output to output argument");
   }
