@@ -182,7 +182,7 @@ func.func @conv3d_add(%arg0: !migraphx.shaped<2x4x2x2x2xf32, 0x1x0x0x0>, %arg1: 
 func.func @conv1d_add(%arg0: !migraphx.shaped<1x64x224xf32, 0x1x0>, %arg1: !migraphx.shaped<1x3x224xf32, 672x224x1>, %arg2: !migraphx.shaped<64x3x7xf32, 21x7x1>) -> !migraphx.shaped<1x64x224xf32, 14336x224x1> {
   // CHECK-COUNT-3: tosa.transpose
   // CHECK: tosa.conv2d
-  // CHECK-SAME: {dilation = array<i64: 1, 1>, group = 1 : i64, pad = array<i64: 3, 3, 0, 0>, stride = array<i64: 1, 1>} : (tensor<1x224x1x3xf32>, tensor<64x7x1x3xf32>, tensor<64xf32>) -> tensor<1x224x1x64xf32>
+  // CHECK-SAME: {acc_type = f32, dilation = array<i64: 1, 1>, group = 1 : i64, pad = array<i64: 3, 3, 0, 0>, stride = array<i64: 1, 1>} : (tensor<1x224x1x3xf32>, tensor<64x7x1x3xf32>, tensor<64xf32>) -> tensor<1x224x1x64xf32>
   // CHECK-2: tosa.transpose
   // CHECK: tosa.add
   %0 = migraphx.convolution %arg1, %arg2 {dilation = [1], group = 1 : i64, padding = [3, 3], padding_mode = 0 : i64, stride = [1]} : <1x3x224xf32, 672x224x1>, <64x3x7xf32, 21x7x1> -> <1x64x224xf32, 14336x224x1>

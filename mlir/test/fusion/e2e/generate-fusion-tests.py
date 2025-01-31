@@ -62,13 +62,15 @@ def generate_op_variants_test(indir, outdir, type, file, opspec):
 def generate_type_only_test(indir, outdir, type, file):
     archNames = getArch()
     arch = ','.join(archNames)
+    # Use f32 instead of bf16 for certain tests because bf16 is not supported as an accumulation type for tosa.conv2d.
+    gen_type = 'f32' if type == 'bf16' and file in ['tosa-to-rock-bcast-add', 'tosa-to-rock-bias'] else type
     if "bf16" in type and "gfx11" in arch:
         return
     with open(f"{indir}/{file}.e2e.template") as f:
         template = f.read()
     outfile = f"{outdir}/{file}-{type}.e2e.mlir"
     with open(outfile, 'w') as f:
-        f.write(template.format(type=type,
+        f.write(template.format(type=type, acc_type=gen_type,
                                 # So far clone-verification only works with f32.
                                 disablep='-DISABLE' if type != 'f32' else ''))
 

@@ -310,7 +310,6 @@ class MIGraphX_ConvOpBase<string mnemonic, list<Type> inputTypes=[], list<Type> 
     MIGraphX_Op<mnemonic> {
     let arguments = (ins MIXRShapedOf<inputTypes>:$input,
                          MIXRShapedOf<inputTypes>:$filter,
-
                          I64ArrayAttr:$padding,
                          I64ArrayAttr:$stride,
                          I64ArrayAttr:$dilation,

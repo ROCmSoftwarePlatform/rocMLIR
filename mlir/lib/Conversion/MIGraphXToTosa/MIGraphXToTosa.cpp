@@ -353,8 +353,15 @@ LogicalResult ConvConverter<ConvType>::matchAndRewrite(
 
   int64_t group = op.getGroup();
 
-  // convolution config attributes
+  // Determine the accumulation type based on the output type.
+  Type accType;
+  if (isa<FloatType>(outElementTy)) {
+    accType = rewriter.getF32Type();
+  } else if (isa<IntegerType>(outElementTy)) {
+    accType = rewriter.getI32Type();
+  }
 
+  // convolution config attributes
   if (dims == 1) {
     if ((dilations.size() != 1) || (strides.size() != 1) ||
         (pads.size() != 2)) {
@@ -371,6 +378,7 @@ LogicalResult ConvConverter<ConvType>::matchAndRewrite(
   cop->setAttr("stride", rewriter.getDenseI64ArrayAttr(strides));
   cop->setAttr("pad", rewriter.getDenseI64ArrayAttr(pads));
   cop->setAttr("group", rewriter.getI64IntegerAttr(group));
+  cop->setAttr("acc_type", TypeAttr::get(accType));
 
   // Convert optional attributes
   if (auto attr = (*op).template getAttrOfType<StringAttr>("perf_config"))
