@@ -389,6 +389,17 @@ static llvm::cl::opt<FeatureToggle> atomicAddF16Feature(
                                 "remove atomic_add_f16 from the feature list")),
     llvm::cl::init(FeatureToggle::infer));
 
+// atomicAddBF16
+static llvm::cl::opt<FeatureToggle> atomicAddBF16Feature(
+    "atomic_add_bf16", llvm::cl::desc("toggle feature atomic_add_bf16"),
+    llvm::cl::values(clEnumValN(FeatureToggle::infer, "infer",
+                                "use the default value provided by the chip"),
+                     clEnumValN(FeatureToggle::on, "on",
+                                "force atomic_add_bf16 into the feature list"),
+                     clEnumValN(FeatureToggle::off, "off",
+                                "remove atomic_add_bf16 from the feature list")),
+    llvm::cl::init(FeatureToggle::infer));
+
 // atomicFmaxF32
 static llvm::cl::opt<FeatureToggle> atomicFMaxF32Feature(
     "atomic_fmax_f32", llvm::cl::desc("toggle feature atomic_fmax_f32"),
@@ -3795,6 +3806,10 @@ static void generateKernel(MLIRContext *context, GenParams &genParams,
       enabledFeatures =
           bitEnumSet(enabledFeatures, rock::GemmFeatures::atomic_add_f16,
                      atomicAddF16Feature == FeatureToggle::on);
+    if (atomicAddBF16Feature != FeatureToggle::infer)
+      enabledFeatures =
+          bitEnumSet(enabledFeatures, rock::GemmFeatures::atomic_add_bf16,
+                     atomicAddBF16Feature == FeatureToggle::on);
     if (atomicFMaxF32Feature != FeatureToggle::infer)
       enabledFeatures =
           bitEnumSet(enabledFeatures, rock::GemmFeatures::atomic_fmax_f32,

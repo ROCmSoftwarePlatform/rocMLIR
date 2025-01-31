@@ -114,6 +114,9 @@ AmdArchInfo mlir::rock::lookupArchInfo(StringRef arch) {
     gfx12Info.hasOcpFp8ConversionInstrs = true;
     gfx12Info.defaultFeatures =
         bitEnumSet(gfx12Info.defaultFeatures, GemmFeatures::atomic_add_f16);
+    gfx12Info.defaultFeatures =
+        bitEnumSet(gfx12Info.defaultFeatures, GemmFeatures::atomic_add_bf16);
+        
     return gfx12Info;
   }
   llvm::errs() << "Warning: unknown architecture, falling back to defaults: "
