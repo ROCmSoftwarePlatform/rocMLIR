@@ -145,6 +145,7 @@ def getMetricArgsForRocprof(arch):
     current_dir = os.path.dirname(os.path.abspath(__file__))
     metrics_path = os.path.join(current_dir, ROCMLIR_INPUT_METRICS_FILE_NAME)
     metrics = []
+    # TODO (gfx950): check if gfx950 supports this
     if (chip not in ["gfx942"]):
        metrics = ['-i', metrics_path]
     return metrics
@@ -1018,7 +1019,7 @@ def getSolverName(testVector, arch, numCU):
         solverName = 'ConvMlirIgemmBwd'
     else:
         solverName = 'ConvMlirIgemmWrW'
-    if config.chip in ['gfx908', 'gfx90a', 'gfx942']:
+    if config.chip in ['gfx908', 'gfx90a', 'gfx942', 'gfx950']:
         solverName+='Xdlops'
     return solverName
 
@@ -1238,7 +1239,7 @@ def tuneMLIRKernels(configs, arch, numCU):
 
 def is_xdlops_present() -> bool:
     """This function checks whether a GPU with xdlops support is present"""
-    xdlop_supported_gpus = ['gfx908', 'gfx90a', 'gfx942']
+    xdlop_supported_gpus = ['gfx908', 'gfx90a', 'gfx942', 'gfx950']
     xdlop_supported_gpus_str = xdlop_supported_gpus[0]
     for gpu in xdlop_supported_gpus[1:]:
         xdlop_supported_gpus_str += '|' + gpu
